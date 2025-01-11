@@ -68,26 +68,26 @@ Currently the module can be started like so:
 
 ```
 python -m aqualogic_mqtt.client \
-  [serial port path] \
-  [MQTT hostname]:[MQTT port] \
-  [MQTT Discovery Prefix]
+  -s [serial port path] \
+  -m [MQTT hostname]:[MQTT port] \
+  -p [MQTT Discovery Prefix]
 ```
 
 E.g. 
 
 ```console
-(venv-pool)$ python -m aqualogic_mqtt.client /dev/ttyUSB0 localhost:1883 homeassistant
+(venv-pool)$ python -m aqualogic_mqtt.client -s /dev/ttyUSB0 -m localhost:1883 -p homeassistant
 ```
 
 The MQTT Discovery Prefix determines the "path" on the MQTT broker where
-the interface is exposed. For Home assistant, the default is
+the interface is exposed. For Home Assistant, the default is
 `homeassistant` unless you have changed it in your configuration.
 
 > **NOTE:** While the topic cannot be covered in depth here, be aware that using multiple USB serial devices (including for example a mix of a USB RS485 interface and Z-Wave or Zigbee stick) may result in unpredictable paths for the serial devices--you may need to set up udev rules to make the correct devices show up at the configured path(s).
 
-It is also possible to connect to a Serial/TCP converter (e.g. a USR-N510) with a host:port, like so
+It is also possible to use the `-t` option (in lieu of `-s`) to connect to a Serial/TCP converter (e.g. a USR-N510) with a host:port, like so
 ```console
-(venv-pool)$ python -m aqualogic_mqtt.client 192.168.1.88:8899 localhost:1883 homeassistant
+(venv-pool)$ python -m aqualogic_mqtt.client -t 192.168.1.88:8899 -m localhost:1883 -p homeassistant
 ```
 Note, however, that using a network converter such as this has
 been found to be unreliable for device control (reading values
