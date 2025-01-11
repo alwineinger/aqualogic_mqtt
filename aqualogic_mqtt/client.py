@@ -3,6 +3,8 @@ import logging
 import sys
 import ssl
 from time import sleep
+import os
+import argparse
 
 import paho.mqtt.client as mqtt
 
@@ -105,17 +107,22 @@ if __name__ == "__main__":
     autodisc_prefix = None
     source = None
     dest = None
-    if len(sys.argv) >= 3 and len(sys.argv) < 5:
-        print('Connecting to {}...'.format(sys.argv[1]))
-        source = sys.argv[1]
-        dest = sys.argv[2]
-        if len(sys.argv) == 4 and not sys.argv[3] == '':
-            autodisc_prefix = sys.argv[3]
-    else:
-        print('Usage: python -m aqualogic_mqtt.client [/serial/path|tcphost:port] [mqttdest] [autodiscover_prefix]')
-        quit()
+    
+    parser = argparse.ArgumentParser(
+                    prog='aqualogic_mqtt',
+                    description='MQTT adapter for pool controllers',
+                    )
+    parser.add_argument('-m', '--mqtt-dest', required=True, type=str, help="MQTT broker destination in the format host:port")
+    source_group = parser.add_mutually_exclusive_group(required=True)
+    source_group.add_argument('-s', '--serial', type=str, help="serial device source (path)")
+    source_group.add_argument('-t', '--tcp', type=str, help="network serial adapter source in the format host:port")
+    parser.add_argument('-p', '--discover-prefix', default="homeassistant", type=str, help="MQTT prefix path (default is \"homeassistant\")")
+    args = parser.parse_args()
 
-    mqtt_client = Client()
+    source = args.serial if args.serial is not None else args.tcp
+    dest = args.mqtt_dest
+
+    mqtt_client = Client(discover_prefix=args.discover_prefix)
     mqtt_client.connect_mqtt(dest=dest)
     mqtt_client.connect_panel(source)
     mqtt_client.loop_forever()
