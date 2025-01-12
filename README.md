@@ -31,7 +31,7 @@ or other intellectual property remain the property of their respective owners.
 
 There are many!
 
-* Not currently possible to set a username or password for MQTT!
+* ~~Not currently possible to set a username or password for MQTT!~~
 * Currently only the Filter, Aux 1, Aux 2, and Super Chlorinate controls are exposed
 * Currently only Air/Pool/Spa Temperature, Pool/Spa Chlorinator (%), Salt Level, and Check System sensors are exposed (need to add especially system messages!)
 * Serial failures may result in hanging—the process may not exit nor recover, and may have to be killed manually
@@ -62,9 +62,7 @@ This venv should remain activated when you run the module as described below.
 
 ## Running
 
-**THE COMMAND LINE INTERFACE WILL CHANGE SOON!**
-
-Currently the module can be started like so:
+The module can be minimally started like so:
 
 ```
 python -m aqualogic_mqtt.client \
@@ -78,12 +76,8 @@ E.g.
 ```console
 (venv-pool)$ python -m aqualogic_mqtt.client -s /dev/ttyUSB0 -m localhost:1883 -p homeassistant
 ```
-
-The MQTT Discovery Prefix determines the "path" on the MQTT broker where
-the interface is exposed. For Home Assistant, the default is
-`homeassistant` unless you have changed it in your configuration.
-
-> **NOTE:** While the topic cannot be covered in depth here, be aware that using multiple USB serial devices (including for example a mix of a USB RS485 interface and Z-Wave or Zigbee stick) may result in unpredictable paths for the serial devices--you may need to set up udev rules to make the correct devices show up at the configured path(s).
+> [!NOTE]
+> While the topic cannot be covered in depth here, be aware that using multiple USB serial devices (including for example a mix of a USB RS485 interface and Z-Wave or Zigbee stick) may result in unpredictable paths for the serial devices--you may need to set up udev rules to make the correct devices show up at the configured path(s).
 
 It is also possible to use the `-t` option (in lieu of `-s`) to connect to a Serial/TCP converter (e.g. a USR-N510) with a host:port, like so
 ```console
@@ -92,6 +86,37 @@ It is also possible to use the `-t` option (in lieu of `-s`) to connect to a Ser
 Note, however, that using a network converter such as this has
 been found to be unreliable for device control (reading values
 usually works well enough).
+
+### MQTT Connection Options
+
+Besides just the MQTT broker's host and port, there are a number of other options that you can specify regarding the connection:
+
+* `--mqtt-username MQTT_USERNAME`
+  * username for the MQTT broker
+* `--mqtt-password MQTT_PASSWORD`
+  * password for MQTT broker 
+    > [!CAUTION]
+    > Generally, specifying passwords on the command line is an insecure practice. See below for a better option.
+* `--mqtt-clientid MQTT_CLIENTID`
+  * client ID provided to the MQTT broker
+* `--mqtt-insecure`
+    * ignore certificate validation errors for the MQTT broker
+      > [!CAUTION]
+      > Using this option exposes you to potential impersonation/MITM attacks.
+* `--mqtt-version {3,5}`
+  * MQTT protocol major version number (default is 5)
+* `--mqtt-transport {tcp,websockets}`
+  * MQTT transport mode (default is tcp unless dest port is 9001 or 443)
+
+#### `AQUALOGIC_MQTT_PASSWORD` environment variable
+
+To avoid specifying the MQTT client password on the command line (where it may be visible in history and process listings), you should instead store such a password in the environment variable `AQUALOGIC_MQTT_PASSWORD`. This variable will be checked if you specify
+`--mqtt-username`. If `--mqtt-password` is also specified, the command line option overrides the environment variable.
+
+### Home Assistant related options
+
+* `-p DISCOVER_PREFIX` or `--discover-prefix DISCOVER_PREFIX`
+  * The MQTT Discovery Prefix determines the "path" on the MQTT broker where the interface is exposed. For Home Assistant discovery to work, you should use `homeassistant`, which is the default unless you have changed it in your configuration.
 
 ## Running in a container
 
@@ -107,7 +132,8 @@ configuration in your Home Assistant instance and make sure that
 discovery is enabled and that the discovery prefix matches what you are
 providing to this module.
 
-> **NOTE:** It's not yet possible to customize the birth message location and the birth message is used—so this must be set to `[prefix]/status` for now!
+> [!IMPORTANT]
+> It's not yet possible to customize the birth message location and the birth message is used—so this must be set to `[prefix]/status` for now!
 
 ## Design Goals
 
