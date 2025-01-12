@@ -189,20 +189,11 @@ if __name__ == "__main__":
     ha_group = parser.add_argument_group("Home Assistant options")
     ha_group.add_argument('-p', '--discover-prefix', default="homeassistant", type=str, 
         help="MQTT prefix path (default is \"homeassistant\")")
-
-    parser.add_argument('-m', '--mqtt-dest', required=True, type=str, help="MQTT broker destination in the format host:port")
-    source_group = parser.add_mutually_exclusive_group(required=True)
-    source_group.add_argument('-s', '--serial', type=str, help="serial device source (path)")
-    source_group.add_argument('-t', '--tcp', type=str, help="network serial adapter source in the format host:port")
-    parser.add_argument('-p', '--discover-prefix', default="homeassistant", type=str, help="MQTT prefix path (default is \"homeassistant\")")
+    
     args = parser.parse_args()
     
     source = args.serial if args.serial is not None else args.tcp
     dest = args.mqtt_dest
-
-    mqtt_client = Client(discover_prefix=args.discover_prefix)
-    mqtt_client.connect_mqtt(dest=dest)
-    mqtt_client.connect_panel(source)
     
     mqtt_client = Client(discover_prefix=args.discover_prefix, 
                          client_id=args.mqtt_clientid, transport=args.mqtt_transport, 
