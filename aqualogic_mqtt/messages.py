@@ -131,7 +131,7 @@ class Messages:
                 f"{ self._identifier }_sensor_spa_chlorinator": {
                     "p": "sensor",
                     "unit_of_meas": "%",
-                    "val_tpl": "{{ value_json.c_p }}",
+                    "val_tpl": "{{ value_json.c_s }}",
                     "obj_id": f"{ self._identifier }_sensor_spa_chlorinator",
                     "uniq_id": f"{ self._identifier }_sensor_spa_chlorinator",
                     "name": "Spa Chlorinator"
