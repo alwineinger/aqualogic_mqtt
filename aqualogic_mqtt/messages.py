@@ -19,7 +19,7 @@ class Messages:
 
         self._values_for_control_state_dict = {
             States.CHECK_SYSTEM: { "key": "cs", "id": f"{ self._identifier }_binary_sensor_check_system", "name": "Check System" },
-            States.LIGHTS: { "key": "l", "id": f"{ self._identifier }_switch_lights", "name": "Lights" },
+            States.LIGHTS: { "key": "l", "id": f"{ self._identifier }_light_lights", "name": "Lights" },
             States.FILTER: { "key": "f", "id": f"{ self._identifier }_switch_filter", "name": "Filter" },
             States.AUX_1: { "key": "aux1", "id": f"{ self._identifier }_switch_aux_1", "name": "Aux 1" },
             States.AUX_2: { "key": "aux2", "id": f"{ self._identifier }_switch_aux_2", "name": "Aux 2" },
@@ -149,10 +149,12 @@ class Messages:
             "qos": 2
         }
         for s in [States.FILTER, States.LIGHTS, States.AUX_1, States.AUX_2, States.SUPER_CHLORINATE]:
+            #TODO: fix waste
             p['cmps'][self._get_id_for_al_state(s)] = {
-                "p": "switch",
-                "dev_cla": "light" if s == States.LIGHTS else "switch",
-                "val_tpl":"{{ value_json." + self._values_for_control_state_dict[s]["key"] + " }}",
+                "p": "light" if s == States.LIGHTS else "switch",
+                "dev_cla": "switch", #invalid for p: "light" but should be ignored.
+                "val_tpl":"{{ value_json." + self._values_for_control_state_dict[s]["key"] + " }}", #ignored for light
+                "stat_val_tpl":"{{ value_json." + self._values_for_control_state_dict[s]["key"] + " }}", #ignored for switch
                 "uniq_id": self._get_id_for_al_state(s),
                 "obj_id": self._get_id_for_al_state(s),
                 "name": self._values_for_control_state_dict[s]["name"], #TODO: Make method?
