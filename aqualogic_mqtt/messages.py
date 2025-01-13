@@ -150,14 +150,19 @@ class Messages:
         }
         for s in [States.FILTER, States.LIGHTS, States.AUX_1, States.AUX_2, States.SUPER_CHLORINATE]:
             #TODO: fix waste
-            p['cmps'][self._get_id_for_al_state(s)] = {
-                "p": "light" if s == States.LIGHTS else "switch",
-                "dev_cla": "switch", #invalid for p: "light" but should be ignored.
-                "val_tpl":"{{ value_json." + self._values_for_control_state_dict[s]["key"] + " }}", #ignored for light
-                "stat_val_tpl":"{{ value_json." + self._values_for_control_state_dict[s]["key"] + " }}", #ignored for switch
+            cmp = {
+                "p": "switch",
+                "dev_cla": "switch",
+                "val_tpl":"{{ value_json." + self._values_for_control_state_dict[s]["key"] + " }}",
                 "uniq_id": self._get_id_for_al_state(s),
                 "obj_id": self._get_id_for_al_state(s),
                 "name": self._values_for_control_state_dict[s]["name"], #TODO: Make method?
                 "cmd_t": f"{self._root}/{self._get_id_for_al_state(s)}/set"
             }
+            if s == States.LIGHTS:
+                cmp['p'] = "light"
+                cmp['stat_val_tpl'] = cmp['val_tpl']
+                del cmp['val_tpl']
+                del cmp['dev_cla']
+            p['cmps'][self._get_id_for_al_state(s)] = cmp
         return json.dumps(p)
