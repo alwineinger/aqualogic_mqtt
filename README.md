@@ -29,20 +29,18 @@ or other intellectual property remain the property of their respective owners.
 
 ## Limitations/TODOs
 
-There are many!
+There are several!
 
 * ~~Not currently possible to set a username or password for MQTT!~~
-* Currently only the Filter, Aux 1, Aux 2, and Super Chlorinate controls are exposed
-* Currently only Air/Pool/Spa Temperature, Pool/Spa Chlorinator (%), Salt Level, and Check System sensors are exposed (need to add especially system messages!)
+* ~~Currently only the Filter, Aux 1, Aux 2, and Super Chlorinate controls are exposed~~
+* ~~Currently only Air/Pool/Spa Temperature, Pool/Spa Chlorinator (%), Salt Level, and Check System sensors are exposed~~ 
+* System Messages are not yet supported
 * Serial failures may result in hanging—the process may not exit nor recover, and may have to be killed manually
 * Metric unit configured systems are not yet supported
 * Not yet possible to use a customized Home Assistant MQTT birth message topic or payload
 * Only one pool controller is supported per MQTT broker (please describe your setup in an issue if this affects you 🤨)
 * Others I'm forgetting
 * Others I don't know about
-
-Fixing several of these will require changing the command line interface,
-hence the warnings below.
 
 ### IMPORTANT:
 
@@ -62,30 +60,76 @@ This venv should remain activated when you run the module as described below.
 
 ## Running
 
+See all options by running: `python -m aqualogic_mqtt.client --help`
+
 The module can be minimally started like so:
 
 ```
 python -m aqualogic_mqtt.client \
   -s [serial port path] \
-  -m [MQTT hostname]:[MQTT port] \
-  -p [MQTT Discovery Prefix]
+  -m [MQTT hostname]:[MQTT port]
 ```
 
-E.g. 
+E.g. the below command starts sending data from a USB RS485 serial device to a MQTT broker running on the same machine, and will enable the "Check System" sensor (and nothing else):
 
 ```console
-(venv-pool)$ python -m aqualogic_mqtt.client -s /dev/ttyUSB0 -m localhost:1883 -p homeassistant
+(venv-pool)$ python -m aqualogic_mqtt.client -s /dev/ttyUSB0 -m localhost:1883
 ```
+
 > [!NOTE]
 > While the topic cannot be covered in depth here, be aware that using multiple USB serial devices (including for example a mix of a USB RS485 interface and Z-Wave or Zigbee stick) may result in unpredictable paths for the serial devices--you may need to set up udev rules to make the correct devices show up at the configured path(s).
 
 It is also possible to use the `-t` option (in lieu of `-s`) to connect to a Serial/TCP converter (e.g. a USR-N510) with a host:port, like so
 ```console
-(venv-pool)$ python -m aqualogic_mqtt.client -t 192.168.1.88:8899 -m localhost:1883 -p homeassistant
+(venv-pool)$ python -m aqualogic_mqtt.client -t 192.168.1.88:8899 -m localhost:1883
 ```
 Note, however, that using a network converter such as this has
 been found to be unreliable for device control (reading values
 usually works well enough).
+
+### Enabling Sensors and Switches
+
+Only the "Check System" sensor is enabled by default. Additional sensors and switches that are present on your system and that you want visible/controllable should be specified using the `-e`/`--enable` option. One or more space-separated device "keys" should be provided to this option; for example, this command:
+
+```
+python -m aqualogic_mqtt.client -e l f aux1 t_p -s /dev/ttyUSB0 -m localhost:1883
+```
+...would enable the Lights (`l`), Filter (`f`), Aux 1 (`aux1`) switches and the Pool Temperature (`t_p`) sensor.
+
+The full list of valid keys is shown in the table below and can be printed by using the `--help` option as mentioned above:
+
+| Key | Sensor/Switch
+| --- | -------------
+| t_a | Air Temperature
+| t_p | Pool Temperature
+| t_s | Spa Temperature
+| cl_p | Pool Chlorinator
+| cl_s | Spa Chlorinator
+| salt | Salt Level
+| s_p | Pump Speed
+| p_p | Pump Power
+| l | Lights
+| f | Filter
+| aux1 | Aux 1
+| aux2 | Aux 2
+| aux3 | Aux 3
+| aux4 | Aux 4
+| aux5 | Aux 5
+| aux6 | Aux 6
+| aux7 | Aux 7
+| aux8 | Aux 8
+| aux9 | Aux 9
+| aux10 | Aux 10
+| aux11 | Aux 11
+| aux12 | Aux 12
+| aux13 | Aux 13
+| aux14 | Aux 14
+| spill | Spillover
+| v3 | Valve 3
+| v4 | Valve 4
+| h1 | Heater 1
+| hauto | Heater Auto Mode
+| sc | Super Chlorinate
 
 ### MQTT Connection Options
 
@@ -116,7 +160,7 @@ To avoid specifying the MQTT client password on the command line (where it may b
 ### Home Assistant related options
 
 * `-p DISCOVER_PREFIX` or `--discover-prefix DISCOVER_PREFIX`
-  * The MQTT Discovery Prefix determines the "path" on the MQTT broker where the interface is exposed. For Home Assistant discovery to work, you should use `homeassistant`, which is the default unless you have changed it in your configuration.
+  * The MQTT Discovery Prefix determines the "path" on the MQTT broker where the interface is exposed. The default for this option is `homeassistant`, which matches the default in Home Assistant. If you have changed it in your Home Assistant configuration, you should specify a different value here.
 
 ## Running in a container
 

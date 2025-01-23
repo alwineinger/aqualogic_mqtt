@@ -31,21 +31,14 @@ class Client:
     _panel = None
     _paho_client = None
     _panel_thread = None
-    _identifier = None
-    _discover_prefix = None
     _formatter = None
     _disconnect_retries = 3
     _disconnect_retry_wait_max = 30
     _disconnect_retry_wait = 1
     _disconnect_retry_num = 0
 
-    def __init__(self, identifier="aqualogic", discover_prefix="homeassistant", 
-                 client_id=None, transport='tcp', protocol_num=5):
-        self._identifier = identifier
-        self._discover_prefix = discover_prefix
-
-        self._formatter = Messages(identifier, discover_prefix)
-
+    def __init__(self, formatter:Messages, client_id=None, transport='tcp', protocol_num=5):
+        self._formatter = formatter
         self._panel = AquaLogic(web_port=0)
 
         protocol = mqtt.MQTTv311 if protocol_num == 3 else mqtt.MQTTv5
@@ -167,12 +160,19 @@ if __name__ == "__main__":
                     prog='aqualogic_mqtt',
                     description='MQTT adapter for pool controllers',
                     )
+    
+    g_group = parser.add_argument_group("General options")
+    g_group.add_argument('-e', '--enable', nargs="+", action="extend",
+        choices=[k for k in Messages.get_valid_entity_meta()], metavar='',
+        help=f"enable one or more entities; valid options are: {', '.join([k+' ('+v+')' for k, v in Messages.get_valid_entity_meta().items()])}")
+
     source_group = parser.add_argument_group("source options")
     source_group_mex = source_group.add_mutually_exclusive_group(required=True)
     source_group_mex.add_argument('-s', '--serial', type=str, metavar="/dev/path",
         help="serial device source (path)")
     source_group_mex.add_argument('-t', '--tcp', type=str, metavar="tcpserialhost:port",
         help="network serial adapter source in the format host:port")
+    
     mqtt_group = parser.add_argument_group('MQTT destination options')
     mqtt_group.add_argument('-m', '--mqtt-dest', required=True, type=str, metavar="mqtthost:port",
         help="MQTT broker destination in the format host:port")
@@ -186,16 +186,20 @@ if __name__ == "__main__":
         help="MQTT protocol major version number (default is 5)")
     mqtt_group.add_argument('--mqtt-transport', type=str, choices=["tcp","websockets"], default="tcp",
         help="MQTT transport mode (default is tcp unless dest port is 9001 or 443)")
+    
     ha_group = parser.add_argument_group("Home Assistant options")
     ha_group.add_argument('-p', '--discover-prefix', default="homeassistant", type=str, 
         help="MQTT prefix path (default is \"homeassistant\")")
-    
+        
     args = parser.parse_args()
     
     source = args.serial if args.serial is not None else args.tcp
     dest = args.mqtt_dest
     
-    mqtt_client = Client(discover_prefix=args.discover_prefix, 
+    formatter = Messages(identifier="aqualogic", discover_prefix=args.discover_prefix, enable=args.enable)
+    print(args.enable)
+    
+    mqtt_client = Client(formatter=formatter, 
                          client_id=args.mqtt_clientid, transport=args.mqtt_transport, 
                          protocol_num=args.mqtt_version
                          )
