@@ -127,7 +127,7 @@ class Messages:
     def get_state_topic(self):
         return f"{self._root}/state"
     
-    def get_state_message(self, panel):
+    def get_state_message(self, panel, system_messages=[]):
         state = {
             "cs": self._onoff[panel.get_state(States.CHECK_SYSTEM)],
         }
@@ -137,6 +137,8 @@ class Messages:
         for k, v in self._control_dict.items():
             state[k] = self._onoff[panel.get_state(v['state'])]
 
+        state['sysm'] = ', '.join(system_messages)
+        
         return json.dumps(state)
     
     #TODO: ^ and v move out of this class, to divorce it from Aqualogic panel?
@@ -175,6 +177,13 @@ class Messages:
                     "obj_id": f"{ self._identifier }_binary_sensor_check_system",
                     "uniq_id": f"{ self._identifier }_binary_sensor_check_system",
                     "name": "Check System"
+                },
+                f"{ self._identifier }_sensor_system_messages": {
+                    "p": "sensor",
+                    "val_tpl":"{{ value_json.sysm }}",
+                    "obj_id": f"{ self._identifier }_sensor_system_messages",
+                    "uniq_id": f"{ self._identifier }_sensor_system_messages",
+                    "name": "System Messages"
                 }
             },
             "stat_t": self.get_state_topic(),
