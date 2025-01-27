@@ -57,7 +57,7 @@ class Client:
     def _panel_changed(self, panel):
         logging.debug(f"_panel_changed called... Publishing to {self._formatter.get_state_topic()}...")
         self._pman.observe_system_message(panel.check_system_msg)
-        msg = self._formatter.get_state_message(panel, self._pman.get_system_messages())
+        msg = self._formatter.get_state_message(panel, self._pman)
         logging.debug(msg)
         self._paho_client.publish(self._formatter.get_state_topic(), msg)
 
@@ -169,8 +169,11 @@ if __name__ == "__main__":
     g_group.add_argument('-e', '--enable', nargs="+", action="extend",
         choices=[k for k in Messages.get_valid_entity_meta()], metavar='',
         help=f"enable one or more entities; valid options are: {', '.join([k+' ('+v+')' for k, v in Messages.get_valid_entity_meta().items()])}")
-    g_group.add_argument('-x', '--system-message-expiration', nargs=1, type=int, default=120, metavar="SECONDS",
+    g_group.add_argument('-x', '--system-message-expiration', nargs=1, type=int, default=180, metavar="SECONDS",
         help="seconds after which a Check System message previously seen is dropped from reporting")
+    #TODO: metavar here is a bit of a kludge and the help text isn't 100% correct!
+    g_group.add_argument('-sms', '--system-message-sensor', nargs="+", type=str, action="append", metavar=("STRING", "KEY [DEV_CLASS]"),
+        help="add a binary sensor that is ON when a given \"Check System\" message appears on the display, with the specified message STRING which will use the MQTT state KEY and optionally device class DEV_CLASS (default is \"problem\")--may be specified multiple times")
 
     source_group = parser.add_argument_group("source options")
     source_group_mex = source_group.add_mutually_exclusive_group(required=True)
@@ -204,7 +207,9 @@ if __name__ == "__main__":
 
     pman = PanelManager(args.system_message_expiration)
     
-    formatter = Messages(identifier="aqualogic", discover_prefix=args.discover_prefix, enable=args.enable)
+    formatter = Messages(identifier="aqualogic", discover_prefix=args.discover_prefix,
+                         enable=args.enable if args.enable is not None else [], 
+                         system_message_sensors=args.system_message_sensor if args.system_message_sensor is not None else [])
     
     mqtt_client = Client(formatter=formatter, panel_manager=pman,
                          client_id=args.mqtt_clientid, transport=args.mqtt_transport, 

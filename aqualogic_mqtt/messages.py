@@ -3,15 +3,19 @@ import logging
 from aqualogic.core import AquaLogic
 from aqualogic.states import States
 
+from .panelmanager import PanelManager
+
 class Messages:
     _identifier = None
     _discover_prefix = None
     _root = None
-    _values_for_control_state_dict = None
+    _control_dict = None
+    _sensor_dict = None
+    _system_message_sensor_dict = None
     _ha_status_path = None
     _onoff = {False: "OFF", True: "ON"}
     
-    def __init__(self, identifier, discover_prefix, enable):
+    def __init__(self, identifier, discover_prefix, enable, system_message_sensors):
         self._identifier = identifier #TODO: Sanitize?
         self._discover_prefix = discover_prefix #TODO: Sanitize?
         self._root = f"{self._discover_prefix}/device/{self._identifier}"
@@ -19,7 +23,14 @@ class Messages:
 
         self._control_dict = { k:v for k,v in Messages.get_control_dict(self._identifier).items() if k in enable }
         self._sensor_dict = { k:v for k,v in Messages.get_sensor_dict(self._identifier).items() if k in enable }
+        self._system_message_sensor_dict = Messages.get_system_message_sensor_dict(self._identifier, system_message_sensors)
     
+    def get_id_for_string(input:(str)):
+        return '_'.join(''.join(map(
+            lambda c: c if str.isidentifier(c) or str.isdecimal(c) else ' ',
+            input
+        )).split()).lstrip('0123456789')
+
     def get_control_dict(identifier = "aqualogic"):
         return {
             #"cs": { "state": States.CHECK_SYSTEM, "id": f"{ identifier }_binary_sensor_check_system", "name": "Check System" },
@@ -115,6 +126,24 @@ class Messages:
             }
         }
     
+    def get_system_message_sensor_dict(identifier = "aqualogic", system_message_sensors = []):
+        reserved_keys = [k for k in Messages.get_valid_entity_meta()]+['cs','sysm']
+        result =  {}
+        for sms in system_message_sensors:
+            key = Messages.get_id_for_string( sms[1] if len(sms) >= 2 else sms[0] )
+            if key in reserved_keys:
+                raise RuntimeError(f"Key \"{key}\" is reserved for an existing sensor or switch--specify an unused key!")
+
+            #TODO: Validate sensor_ids don't conflict?
+            sensor_id = Messages.get_id_for_string( sms[0] )
+
+            result[key] = {
+                "id": f"{ identifier }_{sensor_id}",
+                "dev_cla": "problem" if len(sms) < 3 else str(sms[2]),
+                "name": sms[0]
+            }
+        return result
+
     def get_valid_entity_meta():
         return { k: v['name'] for k, v in (Messages.get_sensor_dict() | Messages.get_control_dict()).items() }
 
@@ -127,9 +156,12 @@ class Messages:
     def get_state_topic(self):
         return f"{self._root}/state"
     
-    def get_state_message(self, panel, system_messages=[]):
+    def get_state_message(self, panel, panel_manager:(PanelManager)):
+        sysm = panel_manager.get_system_messages()
+
         state = {
             "cs": self._onoff[panel.get_state(States.CHECK_SYSTEM)],
+            "sysm": ', '.join(sysm)
         }
         for k, v in self._sensor_dict.items():
             state[k] = getattr(panel, v['attr'])
@@ -137,8 +169,9 @@ class Messages:
         for k, v in self._control_dict.items():
             state[k] = self._onoff[panel.get_state(v['state'])]
 
-        state['sysm'] = ', '.join(system_messages)
-        
+        for k, v in self._system_message_sensor_dict.items():
+            state[k] = self._onoff[v["name"] in sysm]
+
         return json.dumps(state)
     
     #TODO: ^ and v move out of this class, to divorce it from Aqualogic panel?
@@ -217,4 +250,16 @@ class Messages:
                 del cmp['val_tpl']
                 del cmp['dev_cla']
             p['cmps'][v["id"]] = cmp
+
+        for k,v in self._system_message_sensor_dict.items():
+            cmp = {
+                "p": "binary_sensor",
+                "dev_cla": v["dev_cla"],
+                "val_tpl":"{{ value_json." + k + "}}",
+                "obj_id": v["id"],
+                "uniq_id": v["id"],
+                "name": v["name"]
+            }
+            p['cmps'][v["id"]] = cmp
+
         return json.dumps(p)
