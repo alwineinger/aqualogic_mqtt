@@ -34,7 +34,7 @@ There are several!
 * ~~Not currently possible to set a username or password for MQTT!~~
 * ~~Currently only the Filter, Aux 1, Aux 2, and Super Chlorinate controls are exposed~~
 * ~~Currently only Air/Pool/Spa Temperature, Pool/Spa Chlorinator (%), Salt Level, and Check System sensors are exposed~~ 
-* System Messages are not yet supported
+* ~~System Messages are not yet supported~~
 * Serial failures may result in hanging—the process may not exit nor recover, and may have to be killed manually
 * Metric unit configured systems are not yet supported
 * Not yet possible to use a customized Home Assistant MQTT birth message topic or payload
@@ -70,7 +70,7 @@ python -m aqualogic_mqtt.client \
   -m [MQTT hostname]:[MQTT port]
 ```
 
-E.g. the below command starts sending data from a USB RS485 serial device to a MQTT broker running on the same machine, and will enable the "Check System" sensor (and nothing else):
+E.g. the below command starts sending data from a USB RS485 serial device to a MQTT broker running on the same machine, and will enable the "Check System" and "System Messages" sensors (and nothing else):
 
 ```console
 (venv-pool)$ python -m aqualogic_mqtt.client -s /dev/ttyUSB0 -m localhost:1883
@@ -89,7 +89,7 @@ usually works well enough).
 
 ### Enabling Sensors and Switches
 
-Only the "Check System" sensor is enabled by default. Additional sensors and switches that are present on your system and that you want visible/controllable should be specified using the `-e`/`--enable` option. One or more space-separated device "keys" should be provided to this option; for example, this command:
+Only the "Check System" sensor and "System Messages" sensor are enabled by default. Additional sensors and switches that are present on your system and that you want visible/controllable should be specified using the `-e`/`--enable` option. One or more space-separated device "keys" should be provided to this option; for example, this command:
 
 ```
 python -m aqualogic_mqtt.client -e l f aux1 t_p -s /dev/ttyUSB0 -m localhost:1883
@@ -130,6 +130,32 @@ The full list of valid keys is shown in the table below and can be printed by us
 | h1 | Heater 1
 | hauto | Heater Auto Mode
 | sc | Super Chlorinate
+
+### System Message Sensors
+
+#### String Sensor
+
+By default, a string sensor is added that includes all "Check System" messages that are deemed "active," separated by `, `. Messages are "active" if they have been seen within a time window that defaults to the last three minutes. 
+
+#### Binary Sensors
+
+Additional binary sensors can be created based on strings that appear as "Check System" messages by using the `-sms`/`--system-message-sensor` option. Minimally, the desired message string must be passed as the first argument to the `-sms` option. An optional second argument specifies a (usually shorter) "key" to use in the MQTT state payload for the sensor. An optional third argument can be used to specify a different [Home Assistant Device Class](https://www.home-assistant.io/integrations/binary_sensor/#device-class) for the sensor (the default is `problem`).
+
+For example, the following command...
+```
+python -m aqualogic_mqtt.client -sms "Inspect Cell" ic -s /dev/ttyUSB0 -m localhost:1883
+```
+Would add a binary sensor that is "ON" when the text "Check System Inspect Cell" appears on the screen.
+
+The `-sms` option can be specified multiple times to add additional sensors. The string provided should _exactly match_ the text that appears after "Check System" on the display. If a "key" is specified, it must not conflict with any of the keys for existing devices listed above (nor can it be `cs` or `sysm`).
+
+#### Adjusting the active time window
+
+The time window before a message is dropped from active messages can be adjusted with the `-x`/`--system-message-expiration` option. A numeric value in seconds should be provided after this flag (default is 180). For example, this would increase the expiration time for system messages to five minutes:
+```
+python -m aqualogic_mqtt.client -x 300 ic -s /dev/ttyUSB0 -m localhost:1883
+```
+This will affect both the string sensor and any binary sensors.
 
 ### MQTT Connection Options
 
