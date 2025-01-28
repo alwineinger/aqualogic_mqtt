@@ -20,11 +20,6 @@ def _patched_write_to_serial(self, data):
     self._serial.write(data)
     self._serial.flush()
 AquaLogic._write_to_serial = _patched_write_to_serial
-# Monkey-patch class property into _web so we can avoid running the web server without an error
-class _WebDummy:
-    def text_updated(self, str):
-        return
-AquaLogic._web = _WebDummy()
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -142,14 +137,19 @@ class Client:
 
     def loop_forever(self):
         try:
-            #self._paho_client.loop_start()
+            self._paho_client.loop_start()
             self._panel_thread = threading.Thread(target=self._panel.process, args=[self._panel_changed])
+            self._panel_thread.daemon = True # https://stackoverflow.com/a/50788759/489116 ?
             self._panel_thread.start()
-            self._paho_client.loop_forever()
-            #while True:
-            #    sleep(1)
+            #self._paho_client.loop_forever()
+            while True:
+                logging.debug(f"Update age: {self._pman.get_last_update_age()}")
+                if not self._pman.is_updating():
+                    logging.critical("Panel not updated in "+str(self._pman.get_last_update_age())+"s, exiting!")
+                    raise RuntimeError("Panel stopped updating!")
+                sleep(1)
         finally:
-            #self._paho_client.loop_stop()
+            self._paho_client.loop_stop()
             pass
         
         
@@ -181,6 +181,8 @@ if __name__ == "__main__":
         help="serial device source (path)")
     source_group_mex.add_argument('-t', '--tcp', type=str, metavar="tcpserialhost:port",
         help="network serial adapter source in the format host:port")
+    source_group.add_argument('-T', '--source-timeout', nargs=1, type=int, default=10, metavar="SECONDS",
+        help="seconds after which the source connection is deemed to be lost if no updates have been seen--the program will exit if the timeout is reached")
     
     mqtt_group = parser.add_argument_group('MQTT destination options')
     mqtt_group.add_argument('-m', '--mqtt-dest', required=True, type=str, metavar="mqtthost:port",
@@ -205,7 +207,9 @@ if __name__ == "__main__":
     source = args.serial if args.serial is not None else args.tcp
     dest = args.mqtt_dest
 
-    pman = PanelManager(args.system_message_expiration)
+    pman = PanelManager(args.source_timeout, args.system_message_expiration)
+    # Monkey-patch PanelManager into _web so we can avoid running the web server without an error
+    AquaLogic._web = pman
     
     formatter = Messages(identifier="aqualogic", discover_prefix=args.discover_prefix,
                          enable=args.enable if args.enable is not None else [], 
