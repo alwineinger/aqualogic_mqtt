@@ -33,9 +33,10 @@ There are several!
 
 * ~~Not currently possible to set a username or password for MQTT!~~
 * ~~Currently only the Filter, Aux 1, Aux 2, and Super Chlorinate controls are exposed~~
-* ~~Currently only Air/Pool/Spa Temperature, Pool/Spa Chlorinator (%), Salt Level, and Check System sensors are exposed~~ 
+* ~~Currently only Air/Pool/Spa Temperature, Pool/Spa Chlorinator (%), Salt Level, and Check System sensors are exposed~~
+* Pool/Spa button and Service button not yet supported
 * ~~System Messages are not yet supported~~
-* Serial failures may result in hanging—the process may not exit nor recover, and may have to be killed manually
+* ~~Serial failures may result in hanging—the process may not exit nor recover, and may have to be killed manually~~
 * Metric unit configured systems are not yet supported
 * Not yet possible to use a customized Home Assistant MQTT birth message topic or payload
 * Only one pool controller is supported per MQTT broker (please describe your setup in an issue if this affects you 🤨)
@@ -187,6 +188,14 @@ To avoid specifying the MQTT client password on the command line (where it may b
 
 * `-p DISCOVER_PREFIX` or `--discover-prefix DISCOVER_PREFIX`
   * The MQTT Discovery Prefix determines the "path" on the MQTT broker where the interface is exposed. The default for this option is `homeassistant`, which matches the default in Home Assistant. If you have changed it in your Home Assistant configuration, you should specify a different value here.
+
+### Other options
+
+#### Source Timeout
+
+When running, the module keeps track of how long it has been since the last update was received from the pool controller. If no message has been received within the timeout period, the process _exits_. This is designed to allow some other managing process (e.g. container orchestrator, systemd, supervisor, etc.) to restart the module process, hopefully fixing any connection issue. In practice, this has worked to solve serial port "timeout" errors if the cable is disconnected and reconnected or if a power outage takes the pool controller offline.
+
+The default timeout before exit is 10 seconds. Use the `-T`/`--source-timeout` option to change this value, providing some number of seconds as an argument. Using an arbitrarily high number for this value effectively disables the exiting behavior, but this is not recommended.
 
 ## Running in a container
 
