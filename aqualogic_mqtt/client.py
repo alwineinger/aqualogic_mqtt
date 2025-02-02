@@ -15,13 +15,13 @@ from aqualogic.states import States
 from .messages import Messages
 from .panelmanager import PanelManager
 
+logger = logging.getLogger("aqualogic_mqtt.client")
+
 # Monkey-patch broken serial method in Aqualogic
 def _patched_write_to_serial(self, data):
     self._serial.write(data)
     self._serial.flush()
 AquaLogic._write_to_serial = _patched_write_to_serial
-
-logging.basicConfig(level=logging.DEBUG)
 
 class Client:
     _panel = None
@@ -50,65 +50,65 @@ class Client:
 
     # Respond to panel events
     def _panel_changed(self, panel):
-        logging.debug(f"_panel_changed called... Publishing to {self._formatter.get_state_topic()}...")
+        logger.debug(f"_panel_changed called... Publishing to {self._formatter.get_state_topic()}...")
         self._pman.observe_system_message(panel.check_system_msg)
         msg = self._formatter.get_state_message(panel, self._pman)
-        logging.debug(msg)
+        logger.debug(msg)
         self._paho_client.publish(self._formatter.get_state_topic(), msg)
 
     # Respond to MQTT events    
     def _on_message(self, client, userdata, msg):
-        logging.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
+        logger.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
         new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
         for t, m in new_messages:
             self._paho_client.publish(t, m)
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
-        logging.debug("_on_connect called")
+        logger.debug("_on_connect called")
         if isinstance(reason_code, ReasonCode):
             if reason_code.is_failure:
-                logging.critical(f"Got failure when connecting MQTT: {reason_code.getName()}! Exiting!")
+                logger.critical(f"Got failure when connecting MQTT: {reason_code.getName()}! Exiting!")
                 raise RuntimeError(reason_code)
             #elif : #FIXME: elif what?
-            #    logging.debug(f"Got unexpected reason_code when connecting MQTT: {reason_code.getName()}")
-            #    logging.debug(reason_code)
+            #    logger.debug(f"Got unexpected reason_code when connecting MQTT: {reason_code.getName()}")
+            #    logger.debug(reason_code)
         self._disconnect_retry_num = 0
         self._disconnect_retry_wait = 1
 
         sub_topics = self._formatter.get_subscription_topics()
         for topic in sub_topics:
             self._paho_client.subscribe(topic)
-        logging.debug(f"Publishing to {self._formatter.get_discovery_topic()}...")
-        logging.debug(self._formatter.get_discovery_message())
+        logger.debug(f"Publishing to {self._formatter.get_discovery_topic()}...")
+        logger.debug(self._formatter.get_discovery_message())
         self._paho_client.publish(self._formatter.get_discovery_topic(), self._formatter.get_discovery_message())
         ...
     
     def _on_connect_fail(self, userdata, reason_code):
         #TODO: Have not been able to reach here, needs testing!
-        logging.debug("_on_connect_fail called")
+        logger.debug("_on_connect_fail called")
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties):
         if isinstance(reason_code, ReasonCode):
             if reason_code.is_failure:
-                logging.error(f"MQTT Disconnected: {reason_code.getName()}!")
+                logger.error(f"MQTT Disconnected: {reason_code.getName()}!")
                 #NOTE: Paho documentation is confusing about loop_forever and reconnection. Will
                 # this ever be called when loop_forever "automatically handles reconnecting"? If not, it 
                 # seems this callback is really only hit on initial connect failures?
                 if self._disconnect_retry_num < self._disconnect_retries:
                     self._disconnect_retry_num += 1
                     self._disconnect_retry_wait = min(self._disconnect_retry_wait*2, self._disconnect_retry_wait_max)
-                    logging.info(f"Retrying ({self._disconnect_retry_num}) after {self._disconnect_retry_wait}s...")
+                    logger.info(f"Retrying ({self._disconnect_retry_num}) after {self._disconnect_retry_wait}s...")
                     sleep(self._disconnect_retry_wait)
                     self._paho_client.reconnect()
                 else:
-                    logging.critical("MQTT connection failed!")
+                    logger.critical("MQTT connection failed!")
                     self._paho_client.disconnect()
                     raise RuntimeError(reason_code)
             else:
-                logging.debug(f"MQTT Disconnected: {reason_code.getName()}")
+                logger.debug(f"MQTT Disconnected: {reason_code.getName()}")
         elif isinstance(reason_code, int):
             if reason_code > 0:
-                logging.error(f"MQTT Disconnected: {reason_code}")
+                logger.error(f"MQTT Disconnected: {reason_code}")
 
     def panel_connect(self, source):
         if ':' in source:
@@ -133,7 +133,7 @@ class Client:
             else:
                 host = dest
         r = self._paho_client.connect(host, port, keepalive)
-        logging.debug(f"Connected to {host}:{port} with result {r}")
+        logger.debug(f"Connected to {host}:{port} with result {r}")
 
     def loop_forever(self):
         try:
@@ -143,9 +143,9 @@ class Client:
             self._panel_thread.start()
             #self._paho_client.loop_forever()
             while True:
-                logging.debug(f"Update age: {self._pman.get_last_update_age()}")
+                logger.debug(f"Update age: {self._pman.get_last_update_age()}")
                 if not self._pman.is_updating():
-                    logging.critical("Panel not updated in "+str(self._pman.get_last_update_age())+"s, exiting!")
+                    logger.critical("Panel not updated in "+str(self._pman.get_last_update_age())+"s, exiting!")
                     raise RuntimeError("Panel stopped updating!")
                 sleep(1)
         finally:
@@ -174,6 +174,8 @@ if __name__ == "__main__":
     #TODO: metavar here is a bit of a kludge and the help text isn't 100% correct!
     g_group.add_argument('-sms', '--system-message-sensor', nargs="+", type=str, action="append", metavar=("STRING", "KEY [DEV_CLASS]"),
         help="add a binary sensor that is ON when a given \"Check System\" message appears on the display, with the specified message STRING which will use the MQTT state KEY and optionally device class DEV_CLASS (default is \"problem\")--may be specified multiple times")
+    g_group.add_argument('-v', '--verbose', action="count", default=0,
+        help="seconds after which a Check System message previously seen is dropped from reporting")
 
     source_group = parser.add_argument_group("source options")
     source_group_mex = source_group.add_mutually_exclusive_group(required=True)
@@ -203,6 +205,17 @@ if __name__ == "__main__":
         help="MQTT prefix path (default is \"homeassistant\")")
         
     args = parser.parse_args()
+
+    print("aqualogic_mqtt Started")
+
+    if args.verbose >= 3:
+        logging.basicConfig(level=logging.DEBUG)
+    elif args.verbose == 2:
+        logging.basicConfig(level=logging.INFO)
+    elif args.verbose == 1:
+        logging.basicConfig(level=logging.WARNING)
+    else:
+        logging.basicConfig(level=logging.ERROR)
     
     source = args.serial if args.serial is not None else args.tcp
     dest = args.mqtt_dest
@@ -225,8 +238,11 @@ if __name__ == "__main__":
     #TODO Broker client cert
     if args.mqtt_insecure:
         mqtt_client.mqtt_tls_set(cert_reqs=ssl.CERT_NONE)
+    print("Connecting MQTT...")
     mqtt_client.mqtt_connect(dest=dest)
+    print("Connecting Controller...")
     mqtt_client.panel_connect(source)
+    print("Starting loop...")
     mqtt_client.loop_forever()
 
     

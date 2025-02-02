@@ -5,6 +5,7 @@ from aqualogic.states import States
 
 from .panelmanager import PanelManager
 
+logger = logging.getLogger(__name__)
 class Messages:
     _identifier = None
     _discover_prefix = None
@@ -181,7 +182,7 @@ class Messages:
             return [(self.get_discovery_topic(), self.get_discovery_message())] 
         
         state_dict_filtered = { k:v for (k,v) in self._control_dict.items() if f"{self._root}/{v['id']}/set" == topic }
-        logging.debug(f"{state_dict_filtered=}")
+        logger.debug(f"{state_dict_filtered=}")
         for k,v in state_dict_filtered.items(): # Really there will be only one...
             panel.set_state(v['state'], True if msg == "ON" else False)
             return []
