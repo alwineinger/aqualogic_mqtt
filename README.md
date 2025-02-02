@@ -197,6 +197,10 @@ When running, the module keeps track of how long it has been since the last upda
 
 The default timeout before exit is 10 seconds. Use the `-T`/`--source-timeout` option to change this value, providing some number of seconds as an argument. Using an arbitrarily high number for this value effectively disables the exiting behavior, but this is not recommended.
 
+#### Verbose output
+
+You can specify `-v`, `-vv`, or `-vvv` to get more output, up to debugging output. Please consider including the output with `-vvv` on if you are submitting a bug report.
+
 ## Running in a container
 
 **COMING SOON!**

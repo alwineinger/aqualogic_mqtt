@@ -1,6 +1,8 @@
 import time
 import logging
 
+logger = logging.getLogger(__name__)
+
 # At present PanelManager only keeps track of system messages, though
 # it may expand to handle all aqualogic.panel concerns in the future.
 class PanelManager:
@@ -38,5 +40,5 @@ class PanelManager:
     # updates from the panel (e.g. to determine if the connection is lost).
     def text_updated(self, str):
         self._last_text_update = time.time()
-        logging.debug(f"text_updated: {str}")
+        logger.debug(f"text_updated: {str}")
         return
