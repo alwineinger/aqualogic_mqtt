@@ -1,7 +1,4 @@
 # aqualogic_mqtt
-MQTT adapter for pool controllers
-
-**THIS IS ALPHA SOFTWARE AND WILL CHANGE!**
 
 This is a Python module that connects to the RS485 interface on certain Hayward Aqualogic pool controllers
 and interfaces it with an MQTT broker according to the [automatic discovery convention](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery) defined by
@@ -203,7 +200,114 @@ You can specify `-v`, `-vv`, or `-vvv` to get more output, up to debugging outpu
 
 ## Running in a container
 
-**COMING SOON!**
+There are prebuilt container images for releases at [ghcr.io/sphtkr/aqualogic_mqtt:release](ghcr.io/sphtkr/aqualogic_mqtt). While details of running containerized software such as this is a large topic and mostly out of scope, the following are starting points.
+
+Generally, when using the provided container image you should pass the same arguments described above (as if you were running the Python module directly) to the container environment. The Python module is configured as the container `ENTRYPOINT` such that it can receive these arguments.
+
+### Docker
+
+You should be able to start this module in Docker with a command like the following:
+
+```console
+docker run -d --restart=unless-stopped \
+  --privileged --device=/dev/ttyUSB0 \
+  ghcr.io/sphtkr/aqualogic_mqtt:release \
+  -s /dev/ttyUSB0 -m 192.168.1.5:1883 \
+  -e l f aux1 aux2 cl_p salt t_a t_p sc \
+  -sms "Very Low Salt" vls -sms "Inspect Cell" ic
+```
+
+Note the use of `--privileged` to guarantee access to the serial port! There are [other, better ways](https://stackoverflow.com/a/66427245/489116) to securely access serial ports within a container but the solution will vary with your hardware configuration. Also note that if you are using a network serial adapter (again, not recommended) you do not need `--privileged`.
+
+It is also possible to use Docker Compose to set up a service, which adds secrets managment capability (e.g. for `AQUALOGIC_MQTT_PASSWORD`).
+
+### Kubernetes
+
+Here is a rudimentary example Kubernetes deployment YAML manifest (tested with [MicroK8s](https://microk8s.io)):
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aqualogic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aqualogic
+  template:
+    metadata:
+      labels:
+        app: aqualogic
+    spec:
+      containers:
+      - name: aqualogic
+        image: ghcr.io/sphtkr/aqualogic_mqtt:release
+        imagePullPolicy: Always
+        env:
+          - name: "AQUALOGIC_MQTT_PASSWORD"
+            valueFrom:
+              secretKeyRef:
+                name: aqualogic-secrets
+                key: aqualogic_mqtt_password
+        args: [ "-s", "/dev/ttyRS485",
+                "-m", "mosquitto.default.svc.cluster.local:1883",
+                "-e", "l", "f", "aux1", "aux2", "cl_p", "salt", "t_a", "t_p", "sc",
+                "-sms", "Very Low Salt", "vls", 
+                "-sms", "Inspect Cell", "ic" ]
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - mountPath: "/dev/ttyRS485"
+          name: ttyrs485
+      volumes:
+      - name: ttyrs485
+        hostPath:
+          path: /dev/ttyUSB0
+          type: CharDevice
+```
+As in the Docker example above, note the use of `privileged: true`, which it is best practice to avoid! Again, this is not required if you are only using a network serial adapter.
+
+Alternatively, using [Smarter Device Manager](https://community.arm.com/arm-research/b/articles/posts/a-smarter-device-manager-for-kubernetes-on-the-edge) or [Akri](https://docs.akri.sh) can let you more reliably use a serial port device without requiring privilege escalation. Here is an example deployment using Smarter Device Manager:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aqualogic
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aqualogic
+  template:
+    metadata:
+      labels:
+        app: aqualogic
+    spec:
+      containers:
+      - name: aqualogic
+        image: ghcr.io/sphtkr/aqualogic_mqtt:release
+        imagePullPolicy: Always
+        resources:
+          limits:
+            smarter-devices/ttyUSB0: 1
+          requests:
+            smarter-devices/ttyUSB0: 1
+        env:
+          - name: "AQUALOGIC_MQTT_PASSWORD"
+            valueFrom:
+              secretKeyRef:
+                name: aqualogic-secrets
+                key: aqualogic_mqtt_password
+        args: [ "-s", "/dev/ttyUSB0",
+                "-m", "mosquitto.default.svc.cluster.local:1883",
+                "-e", "l", "f", "aux1", "aux2", "cl_p", "salt", "t_a", "t_p", "sc",
+                "-sms", "Very Low Salt", "vls", 
+                "-sms", "Inspect Cell", "ic" ]
+```
+
+In both of these examples note the use of Kubernetes secret management for the `AQUALOGIC_MQTT_PASSWORD` variable, which is preferable to putting it directly in the YAML file's `env` block.
 
 ## Using with Home Assistant
 
