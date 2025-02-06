@@ -200,7 +200,7 @@ You can specify `-v`, `-vv`, or `-vvv` to get more output, up to debugging outpu
 
 ## Running in a container
 
-There are prebuilt container images for releases at [ghcr.io/sphtkr/aqualogic_mqtt:release](ghcr.io/sphtkr/aqualogic_mqtt). While details of running containerized software such as this is a large topic and mostly out of scope, the following are starting points.
+There are prebuilt container images for releases at [ghcr.io/sphtkr/aqualogic_mqtt](ghcr.io/sphtkr/aqualogic_mqtt). While details of running containerized software such as this is a large topic and mostly out of scope, the following are starting points.
 
 Generally, when using the provided container image you should pass the same arguments described above (as if you were running the Python module directly) to the container environment. The Python module is configured as the container `ENTRYPOINT` such that it can receive these arguments.
 
@@ -211,7 +211,7 @@ You should be able to start this module in Docker with a command like the follow
 ```console
 docker run -d --restart=unless-stopped \
   --privileged --device=/dev/ttyUSB0 \
-  ghcr.io/sphtkr/aqualogic_mqtt:release \
+  ghcr.io/sphtkr/aqualogic_mqtt:latest \
   -s /dev/ttyUSB0 -m 192.168.1.5:1883 \
   -e l f aux1 aux2 cl_p salt t_a t_p sc \
   -sms "Very Low Salt" vls -sms "Inspect Cell" ic
@@ -242,7 +242,7 @@ spec:
     spec:
       containers:
       - name: aqualogic
-        image: ghcr.io/sphtkr/aqualogic_mqtt:release
+        image: ghcr.io/sphtkr/aqualogic_mqtt:latest
         imagePullPolicy: Always
         env:
           - name: "AQUALOGIC_MQTT_PASSWORD"
@@ -287,7 +287,7 @@ spec:
     spec:
       containers:
       - name: aqualogic
-        image: ghcr.io/sphtkr/aqualogic_mqtt:release
+        image: ghcr.io/sphtkr/aqualogic_mqtt:latest
         imagePullPolicy: Always
         resources:
           limits:
