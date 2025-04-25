@@ -17,6 +17,14 @@ from .panelmanager import PanelManager
 
 logger = logging.getLogger("aqualogic_mqtt.client")
 
+# Mapping from MQTT command suffix to AquaLogic key codes
+BUTTON_COMMANDS = {
+    "pool_spa": 0x0040,
+    "plus": 0x0020,
+    "minus": 0x0020,
+    # Add more as needed
+}
+
 # Monkey-patch broken serial method in Aqualogic
 def _patched_write_to_serial(self, data):
     self._serial.write(data)
@@ -57,12 +65,30 @@ class Client:
         self._paho_client.publish(self._formatter.get_state_topic(), msg)
 
     # Respond to MQTT events    
+           # def _on_message(self, client, userdata, msg):
+            #    logger.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
+            #    new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
+            #    for t, m in new_messages:
+            #        self._paho_client.publish(t, m)
     def _on_message(self, client, userdata, msg):
         logger.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
-        new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
-        for t, m in new_messages:
-            self._paho_client.publish(t, m)
+    
+        topic = msg.topic
+        payload = str(msg.payload.decode("utf-8"))
+    
+        # Handle dynamic button press commands
+        if topic.startswith("aqualogic/command/"):
+            command = topic.split("/")[-1]
+            if command in BUTTON_COMMANDS:
+                key_code = BUTTON_COMMANDS[command]
+                logger.info(f"Sending button press for '{command}' (key code {hex(key_code)})")
+                self._panel.send_key(key_code)
+                return
 
+    # Fallback to default message handler
+    new_messages = self._formatter.handle_message_on_topic(topic, payload, self._panel)
+    for t, m in new_messages:
+        self._paho_client.publish(t, m)
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         logger.debug("_on_connect called")
         if isinstance(reason_code, ReasonCode):
