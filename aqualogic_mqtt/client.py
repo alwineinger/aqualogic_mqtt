@@ -17,23 +17,6 @@ from .panelmanager import PanelManager
 
 logger = logging.getLogger("aqualogic_mqtt.client")
 
-# Mapping from MQTT command suffix to AquaLogic key codes and friendly names
-BUTTON_COMMANDS = {
-    "pool_spa": {
-        "key_code": 0x0040,
-        "name": "Pool/Spa Toggle"
-    },
-    "plus": {
-        "key_code": 0x0020,
-        "name": "Plus"
-    },
-    "minus": {
-        "key_code": 0x0010,
-        "name": "Minus"
-    }
-    # Add more as needed
-}
-
 # Monkey-patch broken serial method in Aqualogic
 def _patched_write_to_serial(self, data):
     self._serial.write(data)
@@ -74,55 +57,12 @@ class Client:
         self._paho_client.publish(self._formatter.get_state_topic(), msg)
 
     # Respond to MQTT events    
-           # def _on_message(self, client, userdata, msg):
-            #    logger.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
-            #    new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
-            #    for t, m in new_messages:
-            #        self._paho_client.publish(t, m)
     def _on_message(self, client, userdata, msg):
         logger.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
-    
-        topic = msg.topic
-        payload = str(msg.payload.decode("utf-8"))
-    
-        # Handle dynamic button press commands
-        if topic.startswith("aqualogic/command/"):
-            command = topic.split("/")[-1]
-            if command in BUTTON_COMMANDS:
-                key_code = BUTTON_COMMANDS[command]["key_code"]
-                logger.info(f"Sending button press for '{command}' (key code {hex(key_code)})")
-                self._panel.send_key(key_code)
-                return
+        new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
+        for t, m in new_messages:
+            self._paho_client.publish(t, m)
 
-    def _publish_discovery_messages(self):
-        import json
-    
-        for command, data in BUTTON_COMMANDS.items():
-            discovery_topic = f"homeassistant/button/{command}/config"
-            discovery_payload = {
-                "name": data["name"],
-                "command_topic": f"aqualogic/command/{command}",
-                "unique_id": f"aqualogic_{command}",
-                "device": {
-                    "identifiers": ["aqualogic"],
-                    "name": "AquaLogic Controller",
-                    "manufacturer": "Hayward",
-                    "model": "Aqua Plus"
-                }
-            }
-            logger.debug(f"Publishing discovery for {command} to {discovery_topic}")
-            self._paho_client.publish(discovery_topic, json.dumps(discovery_payload), retain=True)
-
-    # Fallback to standard message handling
-    new_messages = self._formatter.handle_message_on_topic(topic, payload, self._panel)
-    for t, m in new_messages:
-        self._paho_client.publish(t, m)
-
-    # Fallback to default message handler
-    new_messages = self._formatter.handle_message_on_topic(topic, payload, self._panel)
-    for t, m in new_messages:
-        self._paho_client.publish(t, m)
-        
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         logger.debug("_on_connect called")
         if isinstance(reason_code, ReasonCode):
@@ -134,9 +74,6 @@ class Client:
             #    logger.debug(reason_code)
         self._disconnect_retry_num = 0
         self._disconnect_retry_wait = 1
-
-         # Publish all dynamic discovery configs
-        self._publish_discovery_messages()
 
         sub_topics = self._formatter.get_subscription_topics()
         for topic in sub_topics:
