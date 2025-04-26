@@ -15,6 +15,9 @@ class Messages:
     _root = None
     _control_dict = None
     _sensor_dict = None
+    #ALW
+    _button_dict = None  
+    #
     _system_message_sensor_dict = None
     _ha_status_path = None
     _onoff = {False: "OFF", True: "ON"}
@@ -27,6 +30,9 @@ class Messages:
 
         self._control_dict = { k:v for k,v in Messages.get_control_dict(self._identifier).items() if k in enable }
         self._sensor_dict = { k:v for k,v in Messages.get_sensor_dict(self._identifier).items() if k in enable }
+        #ALW
+        self._button_dict = self.get_button_dict(self._identifier)  
+        #
         self._system_message_sensor_dict = Messages.get_system_message_sensor_dict(self._identifier, system_message_sensors)
     
     def get_id_for_string(input:(str)):
