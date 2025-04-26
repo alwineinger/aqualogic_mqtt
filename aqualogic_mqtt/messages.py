@@ -30,7 +30,7 @@ class Messages:
         
         self._control_dict = { k:v for k,v in Messages.get_control_dict(self._identifier).items() if k in enable }
         self._sensor_dict = { k:v for k,v in Messages.get_sensor_dict(self._identifier).items() if k in enable }
-        self._button_dict = self.get_button_dict(self._identifier)  
+        self._button_dict = self.get_button_dict()  
         self._system_message_sensor_dict = Messages.get_system_message_sensor_dict(self._identifier, system_message_sensors)
  
     
