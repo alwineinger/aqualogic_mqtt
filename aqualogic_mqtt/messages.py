@@ -221,7 +221,7 @@ class Messages:
             return []
 
     #ALW
-    self._button_dict = self.__class__.get_button_dict(self._identifier)
+    #self._button_dict = self.__class__.get_button_dict(self._identifier)
     for button in self._button_dict.values():
         topic = f"{self._discover_prefix}/button/{button['id']}/config"
         payload = {
