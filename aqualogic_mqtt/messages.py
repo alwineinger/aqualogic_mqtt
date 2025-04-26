@@ -317,5 +317,17 @@ class Messages:
                 "name": v["name"]
             }
             p['cmps'][v["id"]] = cmp
-
+   
+        #ALW Add buttons to the discovery message
+        for k,v in self._button_dict.items():
+            cmp = {
+                "p": "button",
+                "uniq_id": v["unique_id"],
+                "obj_id": v["id"],
+                "name": v["name"],
+                "cmd_t": v["command_topic"]
+            }
+            p['cmps'][v["id"]] = cmp
+        #
+        
         return json.dumps(p)
