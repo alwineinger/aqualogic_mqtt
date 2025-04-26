@@ -30,10 +30,24 @@ class Messages:
 
         self._control_dict = { k:v for k,v in Messages.get_control_dict(self._identifier).items() if k in enable }
         self._sensor_dict = { k:v for k,v in Messages.get_sensor_dict(self._identifier).items() if k in enable }
-        #ALW
         self._button_dict = self.get_button_dict(self._identifier)  
-        #
         self._system_message_sensor_dict = Messages.get_system_message_sensor_dict(self._identifier, system_message_sensors)
+        # Publish MQTT discovery for buttons
+        if self._paho_client is not None:
+            for button in self._button_dict.values():
+                topic = f"{self._discover_prefix}/button/{button['id']}/config"
+                payload = {
+                    "name": button["name"],
+                    "command_topic": f"{self._root}/{button['id']}/set",
+                    "unique_id": button["id"],
+                    "device": {
+                        "identifiers": [self._identifier],
+                        "name": "AquaLogic Controller",
+                        "manufacturer": "Hayward",
+                        "model": "Aqua Plus"
+                    }
+                }
+                self._paho_client.publish(topic, json.dumps(payload), retain=True)    
     
     def get_id_for_string(input:(str)):
         return '_'.join(''.join(map(
@@ -222,20 +236,20 @@ class Messages:
 
     #ALW
     #self._button_dict = self.__class__.get_button_dict(self._identifier)
-    for button in self._button_dict.values():
-        topic = f"{self._discover_prefix}/button/{button['id']}/config"
-        payload = {
-            "name": button["name"],
-            "command_topic": f"{self._root}/{button['id']}/set",
-            "unique_id": button["id"],
-            "device": {
-                "identifiers": [self._identifier],
-                "name": "AquaLogic Controller",
-                "manufacturer": "Hayward",
-                "model": "Aqua Plus"
-            }
-        }
-        self._paho_client.publish(topic, json.dumps(payload), retain=True)
+    #for button in self._button_dict.values():
+    #    topic = f"{self._discover_prefix}/button/{button['id']}/config"
+    #    payload = {
+    #        "name": button["name"],
+    #        "command_topic": f"{self._root}/{button['id']}/set",
+    #        "unique_id": button["id"],
+    #        "device": {
+    #            "identifiers": [self._identifier],
+    #            "name": "AquaLogic Controller",
+    #           "manufacturer": "Hayward",
+    #            "model": "Aqua Plus"
+    #        }
+    #    }
+    #    self._paho_client.publish(topic, json.dumps(payload), retain=True)
     #
     
     def get_discovery_message(self):
