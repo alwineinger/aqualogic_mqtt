@@ -150,16 +150,6 @@ class Messages:
                 "name": "Pump Power"
             }
         }
-
-    #ALW
-   # def get_button_dict(identifier="aqualogic"):
-    #    return {
-     #   "pool_spa_toggle": {
-      #      "key_code": POOL_SPA,
-       #     "id": f"{identifier}_button_pool_spa_toggle",
-        #    "name": "Pool/Spa Toggle"
-         #       }
-        #}
     
     def get_system_message_sensor_dict(identifier = "aqualogic", system_message_sensors = []):
         reserved_keys = [k for k in Messages.get_valid_entity_meta()]+['cs','sysm']
@@ -179,6 +169,19 @@ class Messages:
             }
         return result
 
+    #ALW
+    def get_button_dict(self):
+        return {
+            "pool_spa_toggle": {
+                "key_code": Keys.POOL_SPA,
+                "id": f"{self._identifier}_button_pool_spa_toggle",
+                "name": "Pool/Spa Toggle",
+                "command_topic": f"{self._root}/{self._identifier}_button_pool_spa_toggle/set",
+                "unique_id": f"{self._identifier}_button_pool_spa_toggle",
+            }
+        }
+    #
+    
     def get_valid_entity_meta():
         return { k: v['name'] for k, v in (Messages.get_sensor_dict() | Messages.get_control_dict()).items() }
 
