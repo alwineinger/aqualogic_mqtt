@@ -56,7 +56,7 @@ class Messages:
             "v4": { "state": States.VALVE_4, "id": f"{ identifier }_switch_valve_4", "name": "Valve 4" },
             "h1": { "state": States.HEATER_1, "id": f"{ identifier }_switch_heater_1", "name": "Heater 1" },
             "hauto": { "state": States.HEATER_AUTO_MODE, "id": f"{ identifier }_switch_heater_auto", "name": "Heater Auto Mode" },
-            "sc": { "state": States.SUPER_CHLORINATE, "id": f"{ identifier }_switch_super_chlorinate", "name": "Super Chlorinate" }
+            "sc": { "state": States.SUPER_CHLORINATE, "id": f"{ identifier }_switch_super_chlorinate", "name": "Super Chlorinate" },
            #ALW - add pool and spa
             "pool": { "state": States.POOL, "id": f"{ identifier }_switch_pool", "name": "Pool" },
             "spa": { "state": States.SPA, "id": f"{ identifier }_switch_spa", "name": "Spa" },
