@@ -27,7 +27,8 @@ class Messages:
         self._discover_prefix = discover_prefix #TODO: Sanitize?
         self._root = f"{self._discover_prefix}/device/{self._identifier}"
         self._ha_status_path = f"{self._discover_prefix}/status" #TODO: Make path configurable
-
+        self._paho_client = paho_client
+        
         self._control_dict = { k:v for k,v in Messages.get_control_dict(self._identifier).items() if k in enable }
         self._sensor_dict = { k:v for k,v in Messages.get_sensor_dict(self._identifier).items() if k in enable }
         self._button_dict = self.get_button_dict(self._identifier)  
