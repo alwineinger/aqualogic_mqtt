@@ -11,6 +11,9 @@ from paho.mqtt.reasoncodes import ReasonCode
 
 from aqualogic.core import AquaLogic
 from aqualogic.states import States
+#ALW
+from aqualogic.keys import Keys
+#
 
 from .messages import Messages
 from .panelmanager import PanelManager
@@ -59,6 +62,14 @@ class Client:
     # Respond to MQTT events    
     def _on_message(self, client, userdata, msg):
         logger.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
+
+        # ALW Handle button press for POOL_SPA toggle
+        if msg.topic.endswith("button_pool_spa_toggle/set") and msg.payload.decode().strip().lower() in ["press", "on", "1", "true"]:
+            from aqualogic.keys import Keys
+            logger.info("POOL_SPA button pressed via MQTT")
+            self._panel.send_key(Keys.POOL_SPA)
+            return
+       #  
         new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
         for t, m in new_messages:
             self._paho_client.publish(t, m)

@@ -6,7 +6,7 @@ from aqualogic.states import States
 from .panelmanager import PanelManager
 
 #ALW
-from aqualogic.keys import POOL_SPA  # Needed to send the key later
+from aqualogic.keys import Keys  # Needed to send the key later
 
 logger = logging.getLogger(__name__)
 class Messages:
@@ -64,6 +64,17 @@ class Messages:
             "pool": { "state": States.POOL, "id": f"{ identifier }_switch_pool", "name": "Pool" },
             "spa": { "state": States.SPA, "id": f"{ identifier }_switch_spa", "name": "Spa" },
         }
+    #ALW
+    @staticmethod
+    def get_button_dict(identifier = "aqualogic"):
+        return {
+        "pool_spa_toggle": {
+            "key_code": Keys.POOL_SPA,
+            "id": f"{identifier}_button_pool_spa_toggle",
+            "name": "Pool/Spa Toggle"
+                }
+        }
+    #
     
     def get_sensor_dict(identifier = "aqualogic"):
         return {
@@ -134,14 +145,14 @@ class Messages:
         }
 
     #ALW
-    def get_button_dict(identifier="aqualogic"):
-        return {
-        "pool_spa_toggle": {
-            "key_code": POOL_SPA,
-            "id": f"{identifier}_button_pool_spa_toggle",
-            "name": "Pool/Spa Toggle"
-                }
-        }
+   # def get_button_dict(identifier="aqualogic"):
+    #    return {
+     #   "pool_spa_toggle": {
+      #      "key_code": POOL_SPA,
+       #     "id": f"{identifier}_button_pool_spa_toggle",
+        #    "name": "Pool/Spa Toggle"
+         #       }
+        #}
     
     def get_system_message_sensor_dict(identifier = "aqualogic", system_message_sensors = []):
         reserved_keys = [k for k in Messages.get_valid_entity_meta()]+['cs','sysm']
@@ -203,6 +214,24 @@ class Messages:
             panel.set_state(v['state'], True if msg == "ON" else False)
             return []
 
+    #ALW
+    self._button_dict = Messages.get_button_dict(self._identifier)
+    for button in self._button_dict.values():
+        topic = f"{self._discover_prefix}/button/{button['id']}/config"
+        payload = {
+            "name": button["name"],
+            "command_topic": f"{self._root}/{button['id']}/set",
+            "unique_id": button["id"],
+            "device": {
+                "identifiers": [self._identifier],
+                "name": "AquaLogic Controller",
+                "manufacturer": "Hayward",
+                "model": "Aqua Plus"
+            }
+        }
+        self._paho_client.publish(topic, json.dumps(payload), retain=True)
+    #
+    
     def get_discovery_message(self):
         p =  {
             "dev": {
