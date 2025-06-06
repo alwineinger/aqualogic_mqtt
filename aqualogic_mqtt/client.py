@@ -70,6 +70,13 @@ class Client:
             self._panel.send_key(Keys.POOL_SPA)
             return
        #  
+        # ALW Handle button press for PLUS
+        if msg.topic.endswith("button_plus_set") and msg.payload.decode().strip().lower() in ["press", "on", "1", "true"]:
+            from aqualogic.keys import Keys
+            logger.info("PLUS button pressed via MQTT")
+            self._panel.send_key(Keys.PLUS)
+            return
+       #  
         new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
         for t, m in new_messages:
             self._paho_client.publish(t, m)
