@@ -79,8 +79,14 @@ class Messages:
                 "name": "Pool/Spa Toggle",
                 "command_topic": f"{identifier}/device/{identifier}_button_pool_spa_toggle/set",  #  for discovery
                 "unique_id": f"{identifier}_button_pool_spa_toggle"  #  for discovery
+            },
+            "plus": {
+                "key_code": Keys.PLUS,  #  internal usage
+                "id": f"{identifier}_button_plus",
+                "name": "Plus",
+                "command_topic": f"{identifier}/device/{identifier}_button_plus_set",  #  for discovery
+                "unique_id": f"{identifier}_button_plus"  #  for discovery
             }
-        }
     #
     
     def get_sensor_dict(identifier = "aqualogic"):
@@ -178,6 +184,13 @@ class Messages:
                 "name": "Pool/Spa Toggle",
                 "command_topic": f"{self._root}/{self._identifier}_button_pool_spa_toggle/set",
                 "unique_id": f"{self._identifier}_button_pool_spa_toggle",
+            },
+            "plus": {
+                "key_code": Keys.PLUS,
+                "id": f"{self._identifier}_button_plus",
+                "name": "Plus",
+                "command_topic": f"{self._root}/{self._identifier}_button_plus_set",
+                "unique_id": f"{self._identifier}_button_plus",
             }
         }
     #
@@ -224,24 +237,7 @@ class Messages:
             panel.set_state(v['state'], True if msg == "ON" else False)
             return []
 
-    #ALW
-    #self._button_dict = self.__class__.get_button_dict(self._identifier)
-    #for button in self._button_dict.values():
-    #    topic = f"{self._discover_prefix}/button/{button['id']}/config"
-    #    payload = {
-    #        "name": button["name"],
-    #        "command_topic": f"{self._root}/{button['id']}/set",
-    #        "unique_id": button["id"],
-    #        "device": {
-    #            "identifiers": [self._identifier],
-    #            "name": "AquaLogic Controller",
-    #           "manufacturer": "Hayward",
-    #            "model": "Aqua Plus"
-    #        }
-    #    }
-    #    self._paho_client.publish(topic, json.dumps(payload), retain=True)
-    #
-    
+   
     def get_discovery_message(self):
         p =  {
             "dev": {
