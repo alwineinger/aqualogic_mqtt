@@ -86,7 +86,8 @@ class Messages:
                 "name": "Plus",
                 "command_topic": f"{identifier}/device/{identifier}_button_plus_set",  #  for discovery
                 "unique_id": f"{identifier}_button_plus"  #  for discovery
-            }
+         },
+        }
     #
     
     def get_sensor_dict(identifier = "aqualogic"):
