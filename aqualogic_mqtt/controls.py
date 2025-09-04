@@ -134,36 +134,51 @@ def ingest_display_lines(lines: List[str]) -> None:
 _logger = logging.getLogger("aqualogic_mqtt.controls")
 
 def register_with_panel(panel: object) -> None:
-    """Hook into the underlying aqualogic panel to receive live LCD updates.
-    This attaches to whichever callback API is available without raising if missing.
-    Supported patterns:
-      - panel.on_display_update: callable that receives List[str]
-      - panel.add_listener(kind, payload): emits ('display', List[str])
-    """
-    # Newer style: direct callback
+    """Attach to panel display updates in whatever form the lib exposes."""
+    import logging
+    _logger = logging.getLogger("aqualogic_mqtt.controls")
+
+    def _push(lines):
+        try:
+            cleaned = _clean_lines(lines)
+            ingest_display_lines(cleaned)
+            _logger.debug(f"ingested display via callback: {cleaned!r}")
+        except Exception as e:
+            _logger.debug(f"display callback failed: {e}")
+
     try:
-        cb = getattr(panel, 'on_display_update', None)
-        if callable(cb):
-            _logger.debug('controls.register_with_panel: using on_display_update callback')
-            cb(lambda lines: ingest_display_lines(_clean_lines(lines)))
+        # Case A: method you call with the handler
+        m = getattr(panel, "on_display_update", None)
+        if callable(m):
+            _logger.debug("register_with_panel: using on_display_update(handler)")
+            m(_push)
             return
     except Exception as e:
-        _logger.debug(f'controls.register_with_panel: on_display_update attach failed: {e}')
+        _logger.debug(f"on_display_update(handler) attach failed: {e}")
 
-    # Older/event-bus style: add_listener
     try:
-        add_listener = getattr(panel, 'add_listener', None)
+        # Case B: attribute you assign a handler to
+        if hasattr(panel, "on_display_update") and not callable(getattr(panel, "on_display_update")):
+            _logger.debug("register_with_panel: assigning on_display_update = handler")
+            setattr(panel, "on_display_update", _push)
+            return
+    except Exception as e:
+        _logger.debug(f"assign on_display_update failed: {e}")
+
+    try:
+        # Case C: generic event bus
+        add_listener = getattr(panel, "add_listener", None)
         if callable(add_listener):
-            _logger.debug('controls.register_with_panel: using add_listener("display", ...)')
-            def _disp_listener(kind, payload):
-                if kind == 'display' and isinstance(payload, (list, tuple)):
-                    ingest_display_lines(_clean_lines(payload))
-            add_listener(_disp_listener)
+            _logger.debug("register_with_panel: using add_listener('display', handler)")
+            def _listener(kind, payload):
+                if kind == "display":
+                    _push(payload)
+            add_listener(_listener)
             return
     except Exception as e:
-        _logger.debug(f'controls.register_with_panel: add_listener attach failed: {e}')
+        _logger.debug(f"add_listener attach failed: {e}")
 
-    _logger.debug('controls.register_with_panel: no compatible display callback on panel; relying on client fallback')
+    _logger.debug("register_with_panel: no compatible display callback; will rely on _panel_changed fallback")
 
 def _clean_lines(lines_like) -> List[str]:
     """Normalize any sequence of display strings to a 4-line list w/o NULs."""
