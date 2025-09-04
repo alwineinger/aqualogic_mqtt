@@ -45,7 +45,7 @@ class Client:
         self._panel = AquaLogic(web_port=0)
         # Register low-level key sender so the web/UI can queue button presses
         controls.set_key_sender(self._panel.send_key)
-        controls.register_with_panel(self._panel)  # <-- NEW: live LCD feed if available
+        controls.register_with_panel(self._panel)  # live LCD feed if available
 
         protocol = mqtt.MQTTv311 if protocol_num == 3 else mqtt.MQTTv5
         self._paho_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
@@ -64,10 +64,23 @@ class Client:
             controls.drain_keypresses()
         except Exception as _e:
             logger.debug(f"controls.drain_keypresses() skipped: {_e}")
+
         logger.debug(f"_panel_changed called... Publishing to {self._formatter.get_state_topic()}...")
+
+        # Helpful debug to see what LCD attributes exist on this panel object
+        try:
+            logger.debug(
+                f"display candidates: display={getattr(panel,'display',None)} "
+                f"lcd_lines={getattr(panel,'lcd_lines',None)} "
+                f"get_lcd_lines={'yes' if hasattr(panel,'get_lcd_lines') else 'no'}"
+            )
+        except Exception:
+            pass
+
         self._pman.observe_system_message(panel.check_system_msg)
         msg = self._formatter.get_state_message(panel, self._pman)
         logger.debug(msg)
+
         # Optional: if display/LED info is available, expose it to the web UI
         try:
             # 1) Try to read native LCD lines from the panel object
@@ -80,7 +93,24 @@ class Client:
                 except Exception:
                     lines = []
             elif hasattr(panel, 'display') and isinstance(panel.display, (list, tuple)) and any(panel.display):
-                lines = list(panel.display)
+                # Some forks keep the raw list in `display`
+                lines = [str(s).replace('\x00', '').rstrip() for s in panel.display][:4]
+
+            # 1.5) Last-ditch pickup: scan attributes for anything that looks like the LCD
+            if not any(lines):
+                for name in dir(panel):
+                    lower = name.lower()
+                    if ('disp' in lower) or ('lcd' in lower):
+                        try:
+                            val = getattr(panel, name)
+                            if isinstance(val, (list, tuple)) and any(val):
+                                cand = [str(s).replace('\x00', '').rstrip() for s in val][:4]
+                                if any(cand):
+                                    lines = cand
+                                    logger.debug(f"Picked LCD from panel.{name} -> {lines!r}")
+                                    break
+                        except Exception:
+                            pass
 
             # 2) Fallback: synthesize a readable 4-line screen from known attributes
             def onish(v):
@@ -131,9 +161,10 @@ class Client:
             logger.debug(f"UI lines={lines!r} blink={blink!r} leds={{ {k:v for k,v in leds.items() if v} }}")
         except Exception as _e:
             logger.debug(f"controls.update_display skipped: {_e}")
+
         self._paho_client.publish(self._formatter.get_state_topic(), msg)
 
-    # Respond to MQTT events    
+    # Respond to MQTT events
     def _on_message(self, client, userdata, msg):
         logger.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
 
@@ -143,14 +174,14 @@ class Client:
             logger.info("POOL_SPA button pressed via MQTT")
             self._panel.send_key(Keys.POOL_SPA)
             return
-       #  
+        #
         # ALW Handle button press for PLUS
         if msg.topic.endswith("button_plus_set") and msg.payload.decode().strip().lower() in ["press", "on", "1", "true"]:
             from aqualogic.keys import Keys
             logger.info("PLUS button pressed via MQTT")
             self._panel.send_key(Keys.PLUS)
             return
-       #  
+        #
         new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
         for t, m in new_messages:
             self._paho_client.publish(t, m)
@@ -161,9 +192,6 @@ class Client:
             if reason_code.is_failure:
                 logger.critical(f"Got failure when connecting MQTT: {reason_code.getName()}! Exiting!")
                 raise RuntimeError(reason_code)
-            #elif : #FIXME: elif what?
-            #    logger.debug(f"Got unexpected reason_code when connecting MQTT: {reason_code.getName()}")
-            #    logger.debug(reason_code)
         self._disconnect_retry_num = 0
         self._disconnect_retry_wait = 1
 
@@ -174,7 +202,7 @@ class Client:
         logger.debug(self._formatter.get_discovery_message())
         self._paho_client.publish(self._formatter.get_discovery_topic(), self._formatter.get_discovery_message())
         ...
-    
+
     def _on_connect_fail(self, userdata, reason_code):
         #TODO: Have not been able to reach here, needs testing!
         logger.debug("_on_connect_fail called")
@@ -183,9 +211,6 @@ class Client:
         if isinstance(reason_code, ReasonCode):
             if reason_code.is_failure:
                 logger.error(f"MQTT Disconnected: {reason_code.getName()}!")
-                #NOTE: Paho documentation is confusing about loop_forever and reconnection. Will
-                # this ever be called when loop_forever "automatically handles reconnecting"? If not, it 
-                # seems this callback is really only hit on initial connect failures?
                 if self._disconnect_retry_num < self._disconnect_retries:
                     self._disconnect_retry_num += 1
                     self._disconnect_retry_wait = min(self._disconnect_retry_wait*2, self._disconnect_retry_wait_max)
@@ -355,5 +380,3 @@ if __name__ == "__main__":
     mqtt_client.panel_connect(source)
     print("Starting loop...")
     mqtt_client.loop_forever()
-
-    
