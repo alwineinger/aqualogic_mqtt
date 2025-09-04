@@ -32,7 +32,7 @@
       line-height: 1.2;
       border-radius: 5px;
       white-space: pre; /* keep spaces if any */
-      min-height: 2.4em;
+      min-height: 1.6em;
       min-width: 260px;
     }
     .nav-buttons {
@@ -89,9 +89,12 @@
   const statusEl  = document.getElementById('status');
 
   function collapseLines(lines) {
-    // We already send a single line from backend most of the time,
-    // but collapsing covers any multi-line frames gracefully.
-    return (lines || []).filter(Boolean).join(' ').trim();
+    // Trim each piece, drop NULs, then collapse internal runs of spaces
+    const parts = (lines || [])
+      .filter(Boolean)
+      .map(s => String(s).replace(/\x00/g, '').trim());
+    const text = parts.join(' ').replace(/\s{2,}/g, ' ');
+    return text.trim();
   }
 
   async function poll() {
