@@ -112,56 +112,40 @@ class Client:
                         except Exception:
                             pass
 
-            # 2) Fallback: synthesize a readable 4-line screen from known attributes
-            def onish(v):
-                return v in (True, 'ON', 'On', 'on', '1', 1)
+            if any(lines):
+                # Blink positions (row, col) if available; otherwise keep empty
+                blink = []
+                if hasattr(panel, 'blink_positions'):
+                    try:
+                        blink = list(panel.blink_positions) or []
+                    except Exception:
+                        blink = []
 
-            if not any(lines):
-                ta = getattr(panel, 'air_temp', getattr(panel, 't_a', ''))
-                tp = getattr(panel, 'pool_temp', getattr(panel, 't_p', ''))
-                ts = getattr(panel, 'spa_temp', getattr(panel, 't_s', ''))
-                salt = getattr(panel, 'salt', '')
-                clp = getattr(panel, 'cl_p', '')
-                sysmsg = getattr(panel, 'check_system_msg', '') or getattr(panel, 'sysm', '')
-                pool = getattr(panel, 'pool', '')
-                spa  = getattr(panel, 'spa', '')
+                # Map LEDs with best-effort truthiness from common flags
+                def onish(v):
+                    return v in (True, 'ON', 'On', 'on', '1', 1)
 
-                line0 = f"POOL:{pool}  SPA:{spa}".strip()[:16]
-                line1 = f"TA:{ta}  TP:{tp}  TS:{ts}".strip()[:16]
-                line2 = f"Salt:{salt}  ClP:{clp}".strip()[:16]
-                line3 = (str(sysmsg) if sysmsg else "").strip()[:16]
-                lines = [line0, line1, line2, line3]
-
-            # Blink positions (row, col) if available; otherwise keep empty
-            blink = []
-            if hasattr(panel, 'blink_positions'):
-                try:
-                    blink = list(panel.blink_positions) or []
-                except Exception:
-                    blink = []
-
-            # Map LEDs with best-effort truthiness from common flags
-            leds = {}
-            try:
-                leds = {
-                    'filter': onish(getattr(panel, 'filter_pump', getattr(panel, 'f', None))),
-                    'lights': onish(getattr(panel, 'lights', getattr(panel, 'l', None))),
-                    'spa':    onish(getattr(panel, 'spa', None)),
-                    'pool':   onish(getattr(panel, 'pool', None)),
-                    'aux1':   onish(getattr(panel, 'aux1', None)),
-                    'aux2':   onish(getattr(panel, 'aux2', None)),
-                    'aux3':   onish(getattr(panel, 'aux3', None)),
-                    'aux4':   onish(getattr(panel, 'aux4', None)),
-                }
-            except Exception:
                 leds = {}
+                try:
+                    leds = {
+                        'filter': onish(getattr(panel, 'filter_pump', getattr(panel, 'f', None))),
+                        'lights': onish(getattr(panel, 'lights', getattr(panel, 'l', None))),
+                        'spa':    onish(getattr(panel, 'spa', None)),
+                        'pool':   onish(getattr(panel, 'pool', None)),
+                        'aux1':   onish(getattr(panel, 'aux1', None)),
+                        'aux2':   onish(getattr(panel, 'aux2', None)),
+                        'aux3':   onish(getattr(panel, 'aux3', None)),
+                        'aux4':   onish(getattr(panel, 'aux4', None)),
+                    }
+                except Exception:
+                    leds = {}
 
-            # Always push to the web UI so it never stays blank
-            controls.update_display(lines[:4] + [""] * max(0, 4 - len(lines)), blink, leds)
-
-            # FIXED: avoid NameError in debug logging
-            lit_leds = {name: val for name, val in leds.items() if val}
-            logger.debug(f"UI lines={lines!r} blink={blink!r} leds={lit_leds!r}")
+                # Push only when we have native LCD lines so we don't overwrite real display with blanks
+                controls.update_display(lines[:4] + [""] * max(0, 4 - len(lines)), blink, leds)
+                lit_leds = {name: val for name, val in leds.items() if val}
+                logger.debug(f"UI lines={lines!r} blink={blink!r} leds={lit_leds!r}")
+            else:
+                logger.debug("UI: skipping update (no native LCD lines); leaving prior display intact")
 
         except Exception as _e:
             logger.debug(f"controls.update_display skipped: {_e}")
