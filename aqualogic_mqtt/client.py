@@ -68,31 +68,65 @@ class Client:
         logger.debug(msg)
         # Optional: if display/LED info is available, expose it to the web UI
         try:
-            # The AquaLogic library variants expose different attributes; try common ones.
+            # 1) Try to read native LCD lines from the panel object
             lines = []
             if hasattr(panel, 'lcd_lines') and panel.lcd_lines:
                 lines = list(panel.lcd_lines)
             elif hasattr(panel, 'get_lcd_lines'):
-                lines = list(panel.get_lcd_lines())
-            elif hasattr(panel, 'display') and isinstance(panel.display, (list, tuple)):
+                try:
+                    lines = list(panel.get_lcd_lines())
+                except Exception:
+                    lines = []
+            elif hasattr(panel, 'display') and isinstance(panel.display, (list, tuple)) and any(panel.display):
                 lines = list(panel.display)
-            # Blink positions (row, col) if available
+
+            # 2) Fallback: synthesize a readable 4-line screen from known attributes
+            def onish(v):
+                return v in (True, 'ON', 'On', 'on', '1', 1)
+
+            if not any(lines):
+                ta = getattr(panel, 'air_temp', getattr(panel, 't_a', ''))
+                tp = getattr(panel, 'pool_temp', getattr(panel, 't_p', ''))
+                ts = getattr(panel, 'spa_temp', getattr(panel, 't_s', ''))
+                salt = getattr(panel, 'salt', '')
+                clp = getattr(panel, 'cl_p', '')
+                sysmsg = getattr(panel, 'check_system_msg', '') or getattr(panel, 'sysm', '')
+                pool = getattr(panel, 'pool', '')
+                spa  = getattr(panel, 'spa', '')
+
+                line0 = f"POOL:{pool}  SPA:{spa}".strip()[:16]
+                line1 = f"TA:{ta}  TP:{tp}  TS:{ts}".strip()[:16]
+                line2 = f"Salt:{salt}  ClP:{clp}".strip()[:16]
+                line3 = (str(sysmsg) if sysmsg else "").strip()[:16]
+                lines = [line0, line1, line2, line3]
+
+            # Blink positions (row, col) if available; otherwise keep empty
             blink = []
             if hasattr(panel, 'blink_positions'):
-                blink = list(panel.blink_positions) or []
-            # Simple LED map, best-effort from known flags
+                try:
+                    blink = list(panel.blink_positions) or []
+                except Exception:
+                    blink = []
+
+            # Map LEDs with best-effort truthiness from common flags
             leds = {}
             try:
                 leds = {
-                    'filter': getattr(panel, 'filter_pump', None) in (True, 'ON'),
-                    'lights': getattr(panel, 'lights', None) in (True, 'ON'),
-                    'spa': getattr(panel, 'spa', None) in (True, 'ON'),
-                    'pool': getattr(panel, 'pool', None) in (True, 'ON'),
+                    'filter': onish(getattr(panel, 'filter_pump', getattr(panel, 'f', None))),
+                    'lights': onish(getattr(panel, 'lights', getattr(panel, 'l', None))),
+                    'spa':    onish(getattr(panel, 'spa', None)),
+                    'pool':   onish(getattr(panel, 'pool', None)),
+                    'aux1':   onish(getattr(panel, 'aux1', None)),
+                    'aux2':   onish(getattr(panel, 'aux2', None)),
+                    'aux3':   onish(getattr(panel, 'aux3', None)),
+                    'aux4':   onish(getattr(panel, 'aux4', None)),
                 }
             except Exception:
                 leds = {}
-            if lines:
-                controls.update_display(lines, blink, leds)
+
+            # Always push to the web UI so it never stays blank
+            controls.update_display(lines[:4] + [""] * max(0, 4 - len(lines)), blink, leds)
+            logger.debug(f"UI lines={lines!r} blink={blink!r} leds={{ {k:v for k,v in leds.items() if v} }}")
         except Exception as _e:
             logger.debug(f"controls.update_display skipped: {_e}")
         self._paho_client.publish(self._formatter.get_state_topic(), msg)
