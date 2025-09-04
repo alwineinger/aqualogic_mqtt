@@ -1,5 +1,6 @@
 import time
 import logging
+from . import controls  # forward live LCD text to the web UI
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,9 @@ class PanelManager:
         self._timeout = connect_timeout
         self._exp_s = message_exp_seconds
         self._registry = {}
+        # last seen LCD lines (each display update is two 16-char rows)
+        self._lcd_line0 = ""
+        self._lcd_line1 = ""
 
     def observe_system_message(self, message:(str)):
         if message is None:
@@ -41,4 +45,19 @@ class PanelManager:
     def text_updated(self, str):
         self._last_text_update = time.time()
         logger.debug(f"text_updated: {str}")
+        try:
+            # Normalize raw text into two 16-char LCD rows
+            s = (str or "").replace("\x00", "")
+            s = (s + " " * 32)[:32]
+            line_a = s[:16].rstrip()
+            line_b = s[16:32].rstrip()
+
+            # Remember last two lines; controllers cycle screens rapidly
+            self._lcd_line0 = line_a
+            self._lcd_line1 = line_b
+
+            # Forward to the web UI as a 4-line screen (bottom rows blank for now)
+            controls.update_display([self._lcd_line0, self._lcd_line1, "", ""], blink=None, leds=None)
+        except Exception as e:
+            logger.debug(f"text_updated forward failed: {e}")
         return
