@@ -46,18 +46,14 @@ class PanelManager:
         self._last_text_update = time.time()
         logger.debug(f"text_updated: {str}")
         try:
-            # Normalize raw text into two 16-char LCD rows
-            s = (str or "").replace("\x00", "")
-            s = (s + " " * 32)[:32]
-            line_a = s[:16].rstrip()
-            line_b = s[16:32].rstrip()
+            # Collapse raw text into a single line, strip NULs and padding
+            s = (str or "").replace("\x00", "").strip()
 
-            # Remember last two lines; controllers cycle screens rapidly
-            self._lcd_line0 = line_a
-            self._lcd_line1 = line_b
+            # Remember it
+            self._lcd_line0 = s
 
-            # Forward to the web UI as a 4-line screen (bottom rows blank for now)
-            controls.update_display([self._lcd_line0, self._lcd_line1, "", ""], blink=None, leds=None)
+            # Forward to the web UI as a single line, leave others blank
+            controls.update_display([self._lcd_line0, "", "", ""], blink=None, leds=None)
         except Exception as e:
             logger.debug(f"text_updated forward failed: {e}")
         return
