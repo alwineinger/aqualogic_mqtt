@@ -1,0 +1,159 @@
+<!-- aqualogic_mqtt/static/index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aqualogic Panel</title>
+  <style>
+    :root { --bg: #0b0f14; --panel: #101820; --ink: #e5f4ff; --muted: #6f8597; --accent: #38bdf8; }
+    html, body { margin:0; padding:0; background: var(--bg); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 20px; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .card { background: var(--panel); border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,.35); padding: 16px; }
+
+    .lcd {
+      background: #071119;
+      border-radius: 12px;
+      padding: 16px 16px 8px 16px;
+      box-shadow: inset 0 0 12px rgba(0,0,0,.7);
+      min-height: 150px;
+      position: relative;
+    }
+    .lcd .line { white-space: pre; font-size: 20px; line-height: 1.6; letter-spacing: .5px; min-height: 1.6em; }
+    .blink { animation: blink 1s step-end infinite; text-decoration: underline; }
+    @keyframes blink { 50% { opacity: .2; } }
+
+    .leds { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+    .led { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+    .dot { width: 10px; height: 10px; border-radius: 999px; background: #223; box-shadow: 0 0 0 2px #223; }
+    .dot.on { background: var(--accent); box-shadow: 0 0 18px var(--accent), 0 0 0 2px #223; }
+
+    .keys { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); gap: 12px; }
+    .key { user-select: none; background: #0c1a24; border: 1px solid #163043; border-radius: 12px; padding: 14px 12px; text-align: center; cursor: pointer; font-weight: 600; transition: transform .04s ease, background .15s; }
+    .key:hover { background: #0f2230; }
+    .key:active { transform: translateY(1px); }
+
+    .status { color: var(--muted); font-size: 12px; }
+    .toast { position: fixed; right: 16px; bottom: 16px; background: #12212f; color: var(--ink); padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 24px rgba(0,0,0,.35); display:none; }
+
+    .kbd { display:inline-block; border:1px solid #2a3a4a; border-bottom-width:2px; padding: 2px 6px; border-radius:6px; font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="grid">
+      <div class="card">
+        <div class="lcd" id="lcd">
+          <div class="line" id="l0">&nbsp;</div>
+          <div class="line" id="l1">&nbsp;</div>
+          <div class="line" id="l2">&nbsp;</div>
+          <div class="line" id="l3">&nbsp;</div>
+          <div class="leds" id="leds"></div>
+        </div>
+        <div class="keys" style="margin-top:16px">
+          <div class="key" data-k="menu">MENU <span class="kbd">M</span></div>
+          <div class="key" data-k="left">◀ LEFT <span class="kbd">←</span></div>
+          <div class="key" data-k="right">RIGHT ▶ <span class="kbd">→</span></div>
+          <div class="key" data-k="minus">− MINUS <span class="kbd">-</span></div>
+          <div class="key" data-k="plus">PLUS + <span class="kbd">=</span></div>
+        </div>
+        <div class="status" id="status" style="margin-top:8px">Connecting…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+  const L = [document.getElementById('l0'), document.getElementById('l1'), document.getElementById('l2'), document.getElementById('l3')];
+  const statusEl = document.getElementById('status');
+  const ledsEl = document.getElementById('leds');
+  const toastEl = document.getElementById('toast');
+
+  function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.style.display = 'block';
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => toastEl.style.display = 'none', 1500);
+  }
+
+  function esc(s){
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/ /g,'&nbsp;');
+  }
+
+  function render(lines, blink, leds) {
+    // Render 4 lines with blinking positions
+    const blSet = new Set((blink||[]).map(([r,c]) => `${r}:${c}`));
+    for (let r=0; r<4; r++) {
+      const line = (lines && lines[r]) ? lines[r] : '';
+      let html = '';
+      for (let c=0; c<Math.max(16, line.length); c++) {
+        const ch = line[c] || ' ';
+        const key = `${r}:${c}`;
+        if (blSet.has(key)) {
+          html += `<span class="blink">${esc(ch)}</span>`;
+        } else {
+          html += esc(ch);
+        }
+      }
+      L[r].innerHTML = html;
+    }
+
+    // LEDs
+    ledsEl.innerHTML = '';
+    if (leds) {
+      Object.keys(leds).sort().forEach(k => {
+        const on = !!leds[k];
+        const div = document.createElement('div');
+        div.className = 'led';
+        div.innerHTML = `<span class="dot ${on ? 'on':''}"></span><span>${k.toUpperCase()}</span>`;
+        ledsEl.appendChild(div);
+      });
+    }
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch('/api/display', {cache:'no-store'});
+      if (!res.ok) throw new Error(res.statusText);
+      const j = await res.json();
+      render(j.lines, j.blink, j.leds);
+      statusEl.textContent = `Updated ${(new Date(j.updated_at*1000)).toLocaleTimeString()}`;
+    } catch (e) {
+      statusEl.textContent = 'Disconnected';
+    } finally {
+      setTimeout(poll, 400);
+    }
+  }
+
+  async function sendKey(k) {
+    try {
+      const res = await fetch(`/api/key/${encodeURIComponent(k)}`, {method:'POST'});
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error||'Failed');
+      showToast(`${k.toUpperCase()} sent`);
+    } catch (e) {
+      showToast(e.message || 'Error');
+    }
+  }
+
+  // Button clicks
+  document.querySelectorAll('.key').forEach(btn => {
+    btn.addEventListener('click', () => sendKey(btn.dataset.k));
+  });
+
+  // Keyboard shortcuts
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    if (e.key === 'm' || e.key === 'M') return sendKey('menu');
+    if (e.key === 'ArrowLeft') return sendKey('left');
+    if (e.key === 'ArrowRight') return sendKey('right');
+    if (e.key === '-' ) return sendKey('minus');
+    if (e.key === '=' || e.key === '+') return sendKey('plus');
+  });
+
+  poll();
+  </script>
+</body>
+</html>
