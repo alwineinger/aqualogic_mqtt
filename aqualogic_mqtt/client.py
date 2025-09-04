@@ -17,6 +17,7 @@ from aqualogic.keys import Keys
 
 from .messages import Messages
 from .panelmanager import PanelManager
+from . import controls  # Web/UI controls: key queue + display state
 
 logger = logging.getLogger("aqualogic_mqtt.client")
 
@@ -41,6 +42,8 @@ class Client:
         self._formatter = formatter
         self._pman = panel_manager
         self._panel = AquaLogic(web_port=0)
+        # Register low-level key sender so the web/UI can queue button presses
+        controls.set_key_sender(self._panel.send_key)
 
         protocol = mqtt.MQTTv311 if protocol_num == 3 else mqtt.MQTTv5
         self._paho_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
@@ -53,10 +56,45 @@ class Client:
 
     # Respond to panel events
     def _panel_changed(self, panel):
+        # Drain any queued keypresses as soon as a panel update arrives.
+        # This closely follows the recommendation to send keys right after keepalive frames.
+        try:
+            controls.drain_keypresses()
+        except Exception as _e:
+            logger.debug(f"controls.drain_keypresses() skipped: {_e}")
         logger.debug(f"_panel_changed called... Publishing to {self._formatter.get_state_topic()}...")
         self._pman.observe_system_message(panel.check_system_msg)
         msg = self._formatter.get_state_message(panel, self._pman)
         logger.debug(msg)
+        # Optional: if display/LED info is available, expose it to the web UI
+        try:
+            # The AquaLogic library variants expose different attributes; try common ones.
+            lines = []
+            if hasattr(panel, 'lcd_lines') and panel.lcd_lines:
+                lines = list(panel.lcd_lines)
+            elif hasattr(panel, 'get_lcd_lines'):
+                lines = list(panel.get_lcd_lines())
+            elif hasattr(panel, 'display') and isinstance(panel.display, (list, tuple)):
+                lines = list(panel.display)
+            # Blink positions (row, col) if available
+            blink = []
+            if hasattr(panel, 'blink_positions'):
+                blink = list(panel.blink_positions) or []
+            # Simple LED map, best-effort from known flags
+            leds = {}
+            try:
+                leds = {
+                    'filter': getattr(panel, 'filter_pump', None) in (True, 'ON'),
+                    'lights': getattr(panel, 'lights', None) in (True, 'ON'),
+                    'spa': getattr(panel, 'spa', None) in (True, 'ON'),
+                    'pool': getattr(panel, 'pool', None) in (True, 'ON'),
+                }
+            except Exception:
+                leds = {}
+            if lines:
+                controls.update_display(lines, blink, leds)
+        except Exception as _e:
+            logger.debug(f"controls.update_display skipped: {_e}")
         self._paho_client.publish(self._formatter.get_state_topic(), msg)
 
     # Respond to MQTT events    
