@@ -67,18 +67,39 @@
       margin-top: 10px;
       opacity: .8;
     }
+    .controls-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 12px;
+    }
+    .filter-btn button {
+      background-color: #4caf50;
+      border: none;
+      padding: 12px;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 5px;
+}
+    .filter-btn button:hover { background-color: #3e8e41; }
   </style>
 </head>
 <body>
   <div class="panel">
     <div class="display" id="display">Heater1 Auto Control</div>
 
-    <div class="nav-buttons">
-      <button class="up-button"     data-k="plus">+</button>
-      <button class="left-button"   data-k="left">&lt;</button>
-      <button class="center-button" data-k="menu">Menu</button>
-      <button class="right-button"  data-k="right">&gt;</button>
-      <button class="down-button"   data-k="minus">−</button>
+    <div class="controls-row">
+      <div class="nav-buttons">
+        <button class="up-button"     data-k="plus">+</button>
+        <button class="left-button"   data-k="left">&lt;</button>
+        <button class="center-button" data-k="menu">Menu</button>
+        <button class="right-button"  data-k="right">&gt;</button>
+        <button class="down-button"   data-k="minus">−</button>
+      </div>
+      <div class="filter-btn">
+        <button data-k="filter">Filter</button>
+      </div>
     </div>
 
     <div class="status" id="status">Connecting…</div>

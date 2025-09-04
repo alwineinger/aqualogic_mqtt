@@ -15,6 +15,7 @@ except Exception:  # keep runtime resilient if import fails during edits
         RIGHT = 'RIGHT'
         MINUS = 'MINUS'
         PLUS = 'PLUS'
+        FILTER = 'FILTER'
 
 logger = logging.getLogger("aqualogic_mqtt.controls")
 
@@ -80,6 +81,7 @@ _KEY_MAP = {
     "right": Keys.RIGHT,
     "minus": Keys.MINUS,
     "plus": Keys.PLUS,
+    "filter": Keys.FILTER,
 }
 
 def set_key_sender(sender: Callable[[object], None]) -> None:
@@ -89,7 +91,7 @@ def set_key_sender(sender: Callable[[object], None]) -> None:
     logger.debug("controls: key sender registered")
 
 def enqueue_key(name: str) -> bool:
-    """Queue a keypress by name (menu/left/right/minus/plus)."""
+    """Queue a keypress by name (menu/left/right/minus/plus/filter)."""
     k = (name or "").strip().lower()
     if k not in _KEY_MAP:
         logger.debug(f"controls: unknown key '{name}'")
