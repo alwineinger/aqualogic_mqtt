@@ -1,122 +1,137 @@
-<!-- aqualogic_mqtt/static/index.html (Classic UI to match project web page) -->
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AquaLogic</title>
+  <title>Hayward PL-PLUS Controller</title>
   <style>
-    /* Classic, minimal styling to mirror the original project web page */
-    html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Menlo,Consolas,monospace;font-size:16px;}
-    .wrap{max-width:800px;margin:24px auto;padding:0 16px;}
-    h1{font-size:20px;margin:0 0 12px 0;font-weight:600;}
-    .status{font-size:12px;color:#444;margin:8px 0 16px 0;}
-    .display{border:1px solid #ccc;background:#f9f9f9;padding:12px;white-space:pre;min-height:1.6em;}
-    .buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;}
-    .btn{appearance:none;border:1px solid #aaa;background:#eee;padding:8px 10px;border-radius:4px;cursor:pointer;font-weight:600;}
-    .btn:active{transform:translateY(1px);}
-    .row{display:flex;gap:8px;align-items:center;margin-top:4px;}
-    .label{min-width:80px;color:#333;}
-    .leds{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;color:#333;font-size:13px;}
-    .led{display:flex;align-items:center;gap:6px;}
-    .dot{width:10px;height:10px;border-radius:999px;background:#cfcfcf;border:1px solid #aaa;}
-    .dot.on{background:#0a6;box-shadow:0 0 6px rgba(0,160,96,.6);}
-    .kbd{display:inline-block;border:1px solid #bbb;border-bottom-width:2px;padding:1px 6px;border-radius:4px;font-size:12px;color:#333;background:#f2f2f2;margin-left:6px;}
-    a.simple{color:#06c;text-decoration:none;border-bottom:1px dotted #06c;}
+    /* Match the look of your sample page */
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      background-color: #e0f7fa;
+      font-family: monospace;
+    }
+    .panel {
+      background-color: #333;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      text-align: center;
+      width: 300px;
+    }
+    .display {
+      background-color: #d4edda; /* soft green LCD look */
+      color: #000;
+      padding: 10px;
+      margin-bottom: 20px;
+      font-size: 18px;
+      border-radius: 5px;
+      white-space: pre; /* keep spaces if any */
+      min-height: 1.6em;
+    }
+    .nav-buttons {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      gap: 5px;
+      width: 150px;
+      margin: 0 auto;
+    }
+    button {
+      background-color: #00bcd4;
+      border: none;
+      padding: 10px;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 5px;
+      user-select: none;
+    }
+    button:hover { background-color: #0097a7; }
+    .up-button    { grid-column: 2; grid-row: 1; }
+    .left-button  { grid-column: 1; grid-row: 2; }
+    .center-button{ grid-column: 2; grid-row: 2; }
+    .right-button { grid-column: 3; grid-row: 2; }
+    .down-button  { grid-column: 2; grid-row: 3; }
+
+    /* small status line below grid (optional) */
+    .status {
+      color: #222;
+      font-size: 12px;
+      margin-top: 10px;
+      opacity: .8;
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>AquaLogic</h1>
+  <div class="panel">
+    <div class="display" id="display">Heater1 Auto Control</div>
+
+    <div class="nav-buttons">
+      <button class="up-button"     data-k="plus">+</button>
+      <button class="left-button"   data-k="left">&lt;</button>
+      <button class="center-button" data-k="menu">Menu</button>
+      <button class="right-button"  data-k="right">&gt;</button>
+      <button class="down-button"   data-k="minus">−</button>
+    </div>
+
     <div class="status" id="status">Connecting…</div>
-
-    <!-- Display: show as a single collapsed line to match original page -->
-    <div class="display" id="display">&nbsp;</div>
-
-    <!-- Simple control buttons (flat list, classic look) -->
-    <div class="buttons">
-      <button class="btn" data-k="menu">MENU<span class="kbd">M</span></button>
-      <button class="btn" data-k="left">LEFT<span class="kbd">←</span></button>
-      <button class="btn" data-k="right">RIGHT<span class="kbd">→</span></button>
-      <button class="btn" data-k="minus">MINUS<span class="kbd">-</span></button>
-      <button class="btn" data-k="plus">PLUS<span class="kbd">=</span></button>
-    </div>
-
-    <!-- LEDs, simple inline list to mirror original minimal page -->
-    <div class="row">
-      <div class="label">Status:</div>
-      <div class="leds" id="leds"></div>
-    </div>
-
-    <p style="margin-top:20px;color:#333;font-size:13px">
-      Keyboard shortcuts: <span class="kbd">M</span>, <span class="kbd">←</span>, <span class="kbd">→</span>, <span class="kbd">-</span>, <span class="kbd">=</span>
-      &nbsp;&nbsp;•&nbsp;&nbsp;
-      <a class="simple" href="/api/display" target="_blank">/api/display</a>
-    </p>
   </div>
 
   <script>
-  const statusEl = document.getElementById('status');
   const displayEl = document.getElementById('display');
-  const ledsEl = document.getElementById('leds');
+  const statusEl  = document.getElementById('status');
 
-  function esc(s){
-    return (s||"").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  function collapseLines(lines) {
+    // We already send a single line from backend most of the time,
+    // but collapsing covers any multi-line frames gracefully.
+    return (lines || []).filter(Boolean).join(' ').trim();
   }
 
-  function render(lines, _blink, leds){
-    // Classic page shows a single line: collapse all provided lines
-    const single = (lines||[]).filter(Boolean).join(' ').trim();
-    displayEl.textContent = single || '\xa0';
-
-    // LEDs as simple inline labels with dots
-    ledsEl.innerHTML = '';
-    if (leds){
-      const order = ['filter','pool','spa','lights','aux1','aux2','aux3','aux4'];
-      const keys = order.filter(k => k in leds).concat(Object.keys(leds).filter(k => !order.includes(k)));
-      keys.forEach(k => {
-        const on = !!leds[k];
-        const el = document.createElement('div');
-        el.className = 'led';
-        el.innerHTML = `<span class="dot ${on?'on':''}"></span><span>${esc(k.toUpperCase())}</span>`;
-        ledsEl.appendChild(el);
-      });
-    }
-  }
-
-  async function poll(){
-    try{
-      const res = await fetch('/api/display', {cache:'no-store'});
-      if(!res.ok) throw new Error(res.statusText);
+  async function poll() {
+    try {
+      const res = await fetch('/api/display', { cache: 'no-store' });
+      if (!res.ok) throw new Error(res.statusText);
       const j = await res.json();
-      render(j.lines, j.blink, j.leds);
-      statusEl.textContent = `Updated ${(new Date(j.updated_at*1000)).toLocaleTimeString()}`;
-    }catch(e){
+      displayEl.textContent = collapseLines(j.lines) || '\u00a0';
+      statusEl.textContent = `Updated ${new Date(j.updated_at * 1000).toLocaleTimeString()}`;
+    } catch (e) {
       statusEl.textContent = 'Disconnected';
-    }finally{
+    } finally {
       setTimeout(poll, 600);
     }
   }
 
-  async function sendKey(k){
-    try{
-      const res = await fetch(`/api/key/${encodeURIComponent(k)}`, {method:'POST'});
-      const j = await res.json();
-      if(!j.ok) throw new Error(j.error||'Failed');
-    }catch(e){
-      // keep classic page quiet on errors
+  async function sendKey(k) {
+    try {
+      const res = await fetch(`/api/key/${encodeURIComponent(k)}`, { method: 'POST' });
+      // We don’t need to surface the response if ok; the backend now drains immediately.
+      await res.json().catch(()=>{});
+    } catch (_) {
+      /* keep quiet to match simple sample */
     }
   }
 
-  // Click + keyboard (matches original controls)
-  document.querySelectorAll('.btn').forEach(b => b.addEventListener('click', () => sendKey(b.dataset.k)));
-  window.addEventListener('keydown', e => {
-    if(e.repeat) return;
-    if(e.key==='m'||e.key==='M') return sendKey('menu');
-    if(e.key==='ArrowLeft')   return sendKey('left');
-    if(e.key==='ArrowRight')  return sendKey('right');
-    if(e.key==='-')           return sendKey('minus');
-    if(e.key==='='||e.key==='+') return sendKey('plus');
+  // Click handlers for the 5 buttons
+  document.querySelectorAll('button[data-k]').forEach(btn => {
+    btn.addEventListener('click', () => sendKey(btn.dataset.k));
+  });
+
+  // Keyboard shortcuts:
+  //  - ArrowLeft/ArrowRight
+  //  - '+' or '=' for PLUS, '-' for MINUS
+  //  - 'm' or 'M' for MENU
+  window.addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    if (e.key === 'ArrowLeft')  return sendKey('left');
+    if (e.key === 'ArrowRight') return sendKey('right');
+    if (e.key === '-' )         return sendKey('minus');
+    if (e.key === '=' || e.key === '+') return sendKey('plus');
+    if (e.key === 'm' || e.key === 'M')  return sendKey('menu');
   });
 
   poll();
