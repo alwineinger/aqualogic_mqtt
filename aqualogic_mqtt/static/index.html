@@ -1,156 +1,122 @@
-<!-- aqualogic_mqtt/static/index.html -->
+<!-- aqualogic_mqtt/static/index.html (Classic UI to match project web page) -->
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Aqualogic Panel</title>
+  <title>AquaLogic</title>
   <style>
-    :root { --bg: #0b0f14; --panel: #101820; --ink: #e5f4ff; --muted: #6f8597; --accent: #38bdf8; }
-    html, body { margin:0; padding:0; background: var(--bg); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .wrap { max-width: 900px; margin: 0 auto; padding: 20px; }
-    .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-    .card { background: var(--panel); border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,.35); padding: 16px; }
-
-    .lcd {
-      background: #071119;
-      border-radius: 12px;
-      padding: 16px 16px 8px 16px;
-      box-shadow: inset 0 0 12px rgba(0,0,0,.7);
-      min-height: 150px;
-      position: relative;
-    }
-    .lcd .line { white-space: pre; font-size: 20px; line-height: 1.6; letter-spacing: .5px; min-height: 1.6em; }
-    .blink { animation: blink 1s step-end infinite; text-decoration: underline; }
-    @keyframes blink { 50% { opacity: .2; } }
-
-    .leds { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-    .led { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
-    .dot { width: 10px; height: 10px; border-radius: 999px; background: #223; box-shadow: 0 0 0 2px #223; }
-    .dot.on { background: var(--accent); box-shadow: 0 0 18px var(--accent), 0 0 0 2px #223; }
-
-    .keys { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); gap: 12px; }
-    .key { user-select: none; background: #0c1a24; border: 1px solid #163043; border-radius: 12px; padding: 14px 12px; text-align: center; cursor: pointer; font-weight: 600; transition: transform .04s ease, background .15s; }
-    .key:hover { background: #0f2230; }
-    .key:active { transform: translateY(1px); }
-
-    .status { color: var(--muted); font-size: 12px; }
-    .toast { position: fixed; right: 16px; bottom: 16px; background: #12212f; color: var(--ink); padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 24px rgba(0,0,0,.35); display:none; }
-
-    .kbd { display:inline-block; border:1px solid #2a3a4a; border-bottom-width:2px; padding: 2px 6px; border-radius:6px; font-size: 12px; color: var(--muted); }
+    /* Classic, minimal styling to mirror the original project web page */
+    html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Menlo,Consolas,monospace;font-size:16px;}
+    .wrap{max-width:800px;margin:24px auto;padding:0 16px;}
+    h1{font-size:20px;margin:0 0 12px 0;font-weight:600;}
+    .status{font-size:12px;color:#444;margin:8px 0 16px 0;}
+    .display{border:1px solid #ccc;background:#f9f9f9;padding:12px;white-space:pre;min-height:1.6em;}
+    .buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;}
+    .btn{appearance:none;border:1px solid #aaa;background:#eee;padding:8px 10px;border-radius:4px;cursor:pointer;font-weight:600;}
+    .btn:active{transform:translateY(1px);}
+    .row{display:flex;gap:8px;align-items:center;margin-top:4px;}
+    .label{min-width:80px;color:#333;}
+    .leds{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;color:#333;font-size:13px;}
+    .led{display:flex;align-items:center;gap:6px;}
+    .dot{width:10px;height:10px;border-radius:999px;background:#cfcfcf;border:1px solid #aaa;}
+    .dot.on{background:#0a6;box-shadow:0 0 6px rgba(0,160,96,.6);}
+    .kbd{display:inline-block;border:1px solid #bbb;border-bottom-width:2px;padding:1px 6px;border-radius:4px;font-size:12px;color:#333;background:#f2f2f2;margin-left:6px;}
+    a.simple{color:#06c;text-decoration:none;border-bottom:1px dotted #06c;}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="grid">
-      <div class="card">
-        <div class="lcd" id="lcd">
-          <div class="line" id="l0">&nbsp;</div>
-          <div class="line" id="l1">&nbsp;</div>
-          <div class="line" id="l2">&nbsp;</div>
-          <div class="line" id="l3">&nbsp;</div>
-          <div class="leds" id="leds"></div>
-        </div>
-        <div class="keys" style="margin-top:16px">
-          <div class="key" data-k="menu">MENU <span class="kbd">M</span></div>
-          <div class="key" data-k="left">◀ LEFT <span class="kbd">←</span></div>
-          <div class="key" data-k="right">RIGHT ▶ <span class="kbd">→</span></div>
-          <div class="key" data-k="minus">− MINUS <span class="kbd">-</span></div>
-          <div class="key" data-k="plus">PLUS + <span class="kbd">=</span></div>
-        </div>
-        <div class="status" id="status" style="margin-top:8px">Connecting…</div>
-      </div>
+    <h1>AquaLogic</h1>
+    <div class="status" id="status">Connecting…</div>
+
+    <!-- Display: show as a single collapsed line to match original page -->
+    <div class="display" id="display">&nbsp;</div>
+
+    <!-- Simple control buttons (flat list, classic look) -->
+    <div class="buttons">
+      <button class="btn" data-k="menu">MENU<span class="kbd">M</span></button>
+      <button class="btn" data-k="left">LEFT<span class="kbd">←</span></button>
+      <button class="btn" data-k="right">RIGHT<span class="kbd">→</span></button>
+      <button class="btn" data-k="minus">MINUS<span class="kbd">-</span></button>
+      <button class="btn" data-k="plus">PLUS<span class="kbd">=</span></button>
     </div>
+
+    <!-- LEDs, simple inline list to mirror original minimal page -->
+    <div class="row">
+      <div class="label">Status:</div>
+      <div class="leds" id="leds"></div>
+    </div>
+
+    <p style="margin-top:20px;color:#333;font-size:13px">
+      Keyboard shortcuts: <span class="kbd">M</span>, <span class="kbd">←</span>, <span class="kbd">→</span>, <span class="kbd">-</span>, <span class="kbd">=</span>
+      &nbsp;&nbsp;•&nbsp;&nbsp;
+      <a class="simple" href="/api/display" target="_blank">/api/display</a>
+    </p>
   </div>
 
-  <div class="toast" id="toast"></div>
-
   <script>
-  const L = [document.getElementById('l0'), document.getElementById('l1'), document.getElementById('l2'), document.getElementById('l3')];
   const statusEl = document.getElementById('status');
+  const displayEl = document.getElementById('display');
   const ledsEl = document.getElementById('leds');
-  const toastEl = document.getElementById('toast');
-
-  function showToast(msg) {
-    toastEl.textContent = msg;
-    toastEl.style.display = 'block';
-    clearTimeout(showToast._t);
-    showToast._t = setTimeout(() => toastEl.style.display = 'none', 1500);
-  }
 
   function esc(s){
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/ /g,'&nbsp;');
+    return (s||"").replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
-  function render(lines, blink, leds) {
-    // Render 4 lines with blinking positions
-    const blSet = new Set((blink||[]).map(([r,c]) => `${r}:${c}`));
-    for (let r=0; r<4; r++) {
-      const line = (lines && lines[r]) ? lines[r] : '';
-      let html = '';
-      for (let c=0; c<Math.max(16, line.length); c++) {
-        const ch = line[c] || ' ';
-        const key = `${r}:${c}`;
-        if (blSet.has(key)) {
-          html += `<span class="blink">${esc(ch)}</span>`;
-        } else {
-          html += esc(ch);
-        }
-      }
-      L[r].innerHTML = html;
-    }
+  function render(lines, _blink, leds){
+    // Classic page shows a single line: collapse all provided lines
+    const single = (lines||[]).filter(Boolean).join(' ').trim();
+    displayEl.textContent = single || '\xa0';
 
-    // LEDs
+    // LEDs as simple inline labels with dots
     ledsEl.innerHTML = '';
-    if (leds) {
-      Object.keys(leds).sort().forEach(k => {
+    if (leds){
+      const order = ['filter','pool','spa','lights','aux1','aux2','aux3','aux4'];
+      const keys = order.filter(k => k in leds).concat(Object.keys(leds).filter(k => !order.includes(k)));
+      keys.forEach(k => {
         const on = !!leds[k];
-        const div = document.createElement('div');
-        div.className = 'led';
-        div.innerHTML = `<span class="dot ${on ? 'on':''}"></span><span>${k.toUpperCase()}</span>`;
-        ledsEl.appendChild(div);
+        const el = document.createElement('div');
+        el.className = 'led';
+        el.innerHTML = `<span class="dot ${on?'on':''}"></span><span>${esc(k.toUpperCase())}</span>`;
+        ledsEl.appendChild(el);
       });
     }
   }
 
-  async function poll() {
-    try {
+  async function poll(){
+    try{
       const res = await fetch('/api/display', {cache:'no-store'});
-      if (!res.ok) throw new Error(res.statusText);
+      if(!res.ok) throw new Error(res.statusText);
       const j = await res.json();
       render(j.lines, j.blink, j.leds);
       statusEl.textContent = `Updated ${(new Date(j.updated_at*1000)).toLocaleTimeString()}`;
-    } catch (e) {
+    }catch(e){
       statusEl.textContent = 'Disconnected';
-    } finally {
-      setTimeout(poll, 400);
+    }finally{
+      setTimeout(poll, 600);
     }
   }
 
-  async function sendKey(k) {
-    try {
+  async function sendKey(k){
+    try{
       const res = await fetch(`/api/key/${encodeURIComponent(k)}`, {method:'POST'});
       const j = await res.json();
-      if (!j.ok) throw new Error(j.error||'Failed');
-      showToast(`${k.toUpperCase()} sent`);
-    } catch (e) {
-      showToast(e.message || 'Error');
+      if(!j.ok) throw new Error(j.error||'Failed');
+    }catch(e){
+      // keep classic page quiet on errors
     }
   }
 
-  // Button clicks
-  document.querySelectorAll('.key').forEach(btn => {
-    btn.addEventListener('click', () => sendKey(btn.dataset.k));
-  });
-
-  // Keyboard shortcuts
-  window.addEventListener('keydown', (e) => {
-    if (e.repeat) return;
-    if (e.key === 'm' || e.key === 'M') return sendKey('menu');
-    if (e.key === 'ArrowLeft') return sendKey('left');
-    if (e.key === 'ArrowRight') return sendKey('right');
-    if (e.key === '-' ) return sendKey('minus');
-    if (e.key === '=' || e.key === '+') return sendKey('plus');
+  // Click + keyboard (matches original controls)
+  document.querySelectorAll('.btn').forEach(b => b.addEventListener('click', () => sendKey(b.dataset.k)));
+  window.addEventListener('keydown', e => {
+    if(e.repeat) return;
+    if(e.key==='m'||e.key==='M') return sendKey('menu');
+    if(e.key==='ArrowLeft')   return sendKey('left');
+    if(e.key==='ArrowRight')  return sendKey('right');
+    if(e.key==='-')           return sendKey('minus');
+    if(e.key==='='||e.key==='+') return sendKey('plus');
   });
 
   poll();
