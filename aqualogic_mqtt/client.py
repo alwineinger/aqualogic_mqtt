@@ -158,7 +158,11 @@ class Client:
 
             # Always push to the web UI so it never stays blank
             controls.update_display(lines[:4] + [""] * max(0, 4 - len(lines)), blink, leds)
-            logger.debug(f"UI lines={lines!r} blink={blink!r} leds={{ {k:v for k,v in leds.items() if v} }}")
+
+            # FIXED: avoid NameError in debug logging
+            lit_leds = {name: val for name, val in leds.items() if val}
+            logger.debug(f"UI lines={lines!r} blink={blink!r} leds={lit_leds!r}")
+
         except Exception as _e:
             logger.debug(f"controls.update_display skipped: {_e}")
 
