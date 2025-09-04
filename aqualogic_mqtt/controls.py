@@ -40,6 +40,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import threading
 import queue
 import time
+import logging
 
 # Exported button names → low-level key names expected by the controller
 KEYMAP: Dict[str, str] = {
@@ -124,6 +125,57 @@ class DisplayState:
 
 _state_lock = threading.Lock()
 _state = DisplayState()
+
+
+def ingest_display_lines(lines: List[str]) -> None:
+    """Alias for update_display when only LCD lines are known."""
+    update_display(lines, None, None)
+
+_logger = logging.getLogger("aqualogic_mqtt.controls")
+
+def register_with_panel(panel: object) -> None:
+    """Hook into the underlying aqualogic panel to receive live LCD updates.
+    This attaches to whichever callback API is available without raising if missing.
+    Supported patterns:
+      - panel.on_display_update: callable that receives List[str]
+      - panel.add_listener(kind, payload): emits ('display', List[str])
+    """
+    # Newer style: direct callback
+    try:
+        cb = getattr(panel, 'on_display_update', None)
+        if callable(cb):
+            _logger.debug('controls.register_with_panel: using on_display_update callback')
+            cb(lambda lines: ingest_display_lines(_clean_lines(lines)))
+            return
+    except Exception as e:
+        _logger.debug(f'controls.register_with_panel: on_display_update attach failed: {e}')
+
+    # Older/event-bus style: add_listener
+    try:
+        add_listener = getattr(panel, 'add_listener', None)
+        if callable(add_listener):
+            _logger.debug('controls.register_with_panel: using add_listener("display", ...)')
+            def _disp_listener(kind, payload):
+                if kind == 'display' and isinstance(payload, (list, tuple)):
+                    ingest_display_lines(_clean_lines(payload))
+            add_listener(_disp_listener)
+            return
+    except Exception as e:
+        _logger.debug(f'controls.register_with_panel: add_listener attach failed: {e}')
+
+    _logger.debug('controls.register_with_panel: no compatible display callback on panel; relying on client fallback')
+
+def _clean_lines(lines_like) -> List[str]:
+    """Normalize any sequence of display strings to a 4-line list w/o NULs."""
+    out = []
+    try:
+        for s in list(lines_like)[:4]:
+            out.append(str(s).replace('\x00', '').rstrip())
+    except Exception:
+        pass
+    if not out:
+        out = ["", "", "", ""]
+    return out
 
 
 def update_display(lines: List[str], blink: Optional[List[Tuple[int, int]]] = None,

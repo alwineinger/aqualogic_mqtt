@@ -45,6 +45,7 @@ class Client:
         self._panel = AquaLogic(web_port=0)
         # Register low-level key sender so the web/UI can queue button presses
         controls.set_key_sender(self._panel.send_key)
+	controls.register_with_panel(self._panel)  # <-- NEW: live LCD feed if available
 
         protocol = mqtt.MQTTv311 if protocol_num == 3 else mqtt.MQTTv5
         self._paho_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
