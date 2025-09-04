@@ -18,6 +18,7 @@ from aqualogic.keys import Keys
 from .messages import Messages
 from .panelmanager import PanelManager
 from . import controls  # Web/UI controls: key queue + display state
+from .webapp import create_app  # Embedded Flask app for Web UI
 
 logger = logging.getLogger("aqualogic_mqtt.client")
 
@@ -293,7 +294,14 @@ if __name__ == "__main__":
     ha_group = parser.add_argument_group("Home Assistant options")
     ha_group.add_argument('-p', '--discover-prefix', default="homeassistant", type=str, 
         help="MQTT prefix path (default is \"homeassistant\")")
-        
+
+    web_group = parser.add_argument_group("Web UI options")
+    web_group.add_argument('--http-host', default=os.getenv('AQUALOGIC_HTTP_HOST', '0.0.0.0'), type=str, help='Web UI bind host (default: 0.0.0.0)')
+    web_group.add_argument('--http-port', default=int(os.getenv('AQUALOGIC_HTTP_PORT', '0')), type=int, help='Web UI port; 0 disables (default: 0)')
+    web_group.add_argument('--http-basic-user', default=os.getenv('AQUALOGIC_HTTP_USER'), type=str, help='Basic auth user for Web UI (optional)')
+    web_group.add_argument('--http-basic-pass', default=os.getenv('AQUALOGIC_HTTP_PASS'), type=str, help='Basic auth password for Web UI (optional)')
+    web_group.add_argument('--http-static-dir', default=os.getenv('AQUALOGIC_STATIC_DIR'), type=str, help='Path to static dir (defaults to package static)')
+
     args = parser.parse_args()
 
     print("aqualogic_mqtt Started")
@@ -328,6 +336,18 @@ if __name__ == "__main__":
     #TODO Broker client cert
     if args.mqtt_insecure:
         mqtt_client.mqtt_tls_set(cert_reqs=ssl.CERT_NONE)
+
+    # Start embedded Web UI server (same process -> shared controls state)
+    if args.http_port and args.http_port > 0:
+        try:
+            app = create_app(static_dir=args.http_static_dir, basic_user=args.http_basic_user, basic_pass=args.http_basic_pass)
+            import threading as _threading
+            _t = _threading.Thread(target=lambda: app.run(host=args.http_host, port=args.http_port, debug=False, use_reloader=False), daemon=True)
+            _t.start()
+            print(f"Web UI listening on http://{args.http_host}:{args.http_port}")
+        except Exception as _web_e:
+            print(f"Failed to start Web UI: {_web_e}")
+
     print("Connecting MQTT...")
     mqtt_client.mqtt_connect(dest=dest)
     print("Connecting Controller...")
