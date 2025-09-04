@@ -96,7 +96,7 @@ def enqueue_key(name: str) -> bool:
         return False
     with _key_lock:
         _key_q.append(_KEY_MAP[k])
-    logger.debug(f"controls: queued key {k}")
+    logger.info(f"controls: queued key {k}")
     return True
 
 def drain_keypresses() -> None:

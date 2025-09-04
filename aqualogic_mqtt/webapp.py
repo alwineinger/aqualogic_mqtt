@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os
 import base64
+import logging
 from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory
 from . import controls
@@ -15,12 +16,22 @@ def _basic_auth(user: str | None, pw: str | None):
         def inner(*args, **kwargs):
             if request.headers.get("Authorization") == token:
                 return f(*args, **kwargs)
-            return ("Unauthorized", 401, {"WWW-Authenticate": 'Basic realm="AquaLogic"'})
+            return ("Unauthorized", 401, {"WWW-Authenticate": 'Basic realm=\"AquaLogic\"'})
         return inner
     return decorator
 
+def _enable_flask_logging(app: Flask):
+    # Ensure our app logger is at least INFO and has a handler
+    if app.logger.level > logging.INFO:
+        app.logger.setLevel(logging.INFO)
+    if not app.logger.handlers:
+        h = logging.StreamHandler()
+        h.setLevel(logging.INFO)
+        app.logger.addHandler(h)
+
 def create_app(static_dir: str | None = None, basic_user: str | None = None, basic_pass: str | None = None) -> Flask:
     app = Flask(__name__, static_folder=None)
+    _enable_flask_logging(app)
     require_auth = _basic_auth(basic_user, basic_pass)
 
     # ---- API ----
@@ -33,10 +44,18 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
     @require_auth
     def api_keypress(keyname):
         ok = controls.enqueue_key(keyname)
+        app.logger.info(f"POST /api/key/{keyname} -> queued={ok}")
+        # Send immediately (don’t wait for next panel update)
+        try:
+            controls.drain_keypresses()
+            app.logger.info("controls.drain_keypresses() invoked")
+        except Exception as e:
+            app.logger.info(f"controls.drain_keypresses() error: {e}")
         return jsonify({"ok": bool(ok), "key": keyname})
 
     # ---- Static UI ----
     _static_dir = (static_dir or os.path.join(os.path.dirname(__file__), "static"))
+
     @app.get("/")
     @require_auth
     def index():
