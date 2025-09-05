@@ -83,11 +83,17 @@
     .right-button { grid-column: 3; grid-row: 2; }
     .down-button  { grid-column: 2; grid-row: 3; }
 
+    .aux-buttons { display:flex; gap:10px; }
     .filter-btn button {
       background-color: #4caf50;
       padding: 12px 14px;
     }
     .filter-btn button:hover { background-color: #3e8e41; }
+    .poolspa-btn button {
+      background-color: #7b5cf0; /* purple-ish to differentiate */
+      padding: 12px 14px;
+    }
+    .poolspa-btn button:hover { background-color: #6a49e6; }
 
     .status {
       color: #ddd;
@@ -96,8 +102,8 @@
       opacity: .9;
     }
 
-    /* Very small screens: stack filter under the pad */
-    @media (max-width: 360px) {
+    /* Very small screens: stack aux buttons under the pad */
+    @media (max-width: 420px) {
       .controls-row {
         flex-direction: column;
         align-items: stretch;
@@ -106,9 +112,8 @@
         width: 100%;
         min-width: 0;
       }
-      .filter-btn button {
-        width: 100%;
-      }
+      .aux-buttons { justify-content: space-between; }
+      .aux-buttons button { flex:1; }
     }
   </style>
 </head>
@@ -124,8 +129,14 @@
         <button class="right-button"  data-k="right">&gt;</button>
         <button class="down-button"   data-k="minus">−</button>
       </div>
-      <div class="filter-btn">
-        <button data-k="filter">Filter</button>
+
+      <div class="aux-buttons">
+        <div class="filter-btn">
+          <button data-k="filter">Filter</button>
+        </div>
+        <div class="poolspa-btn">
+          <button data-k="pool_spa">Pool/Spa</button>
+        </div>
       </div>
     </div>
 
@@ -175,6 +186,7 @@
     } catch (_) { /* quiet */ }
   }
 
+  // Click handlers for all buttons
   document.querySelectorAll('button[data-k]').forEach(btn => {
     btn.addEventListener('click', () => sendKey(btn.dataset.k));
   });
@@ -187,6 +199,7 @@
     if (e.key === '-' )         return sendKey('minus');
     if (e.key === '=' || e.key === '+') return sendKey('plus');
     if (e.key === 'm' || e.key === 'M')  return sendKey('menu');
+    if (e.key === 'p' || e.key === 'P')  return sendKey('pool_spa'); // Pool/Spa shortcut
   });
 
   poll();

@@ -16,6 +16,7 @@ except Exception:  # keep runtime resilient if import fails during edits
         MINUS = 'MINUS'
         PLUS = 'PLUS'
         FILTER = 'FILTER'
+        POOL_SPA = 'POOL_SPA'
 
 logger = logging.getLogger("aqualogic_mqtt.controls")
 
@@ -82,6 +83,10 @@ _KEY_MAP = {
     "minus": Keys.MINUS,
     "plus": Keys.PLUS,
     "filter": Keys.FILTER,
+    "pool_spa": getattr(Keys, "POOL_SPA", getattr(Keys, "POOL_SPA_TOGGLE", Keys.MENU)),  # fallback to MENU if missing
+    # optional aliases:
+    "poolspa": getattr(Keys, "POOL_SPA", getattr(Keys, "POOL_SPA_TOGGLE", Keys.MENU)),
+    "pool_spa_toggle": getattr(Keys, "POOL_SPA", getattr(Keys, "POOL_SPA_TOGGLE", Keys.MENU)),
 }
 
 def set_key_sender(sender: Callable[[object], None]) -> None:
@@ -91,7 +96,7 @@ def set_key_sender(sender: Callable[[object], None]) -> None:
     logger.debug("controls: key sender registered")
 
 def enqueue_key(name: str) -> bool:
-    """Queue a keypress by name (menu/left/right/minus/plus/filter)."""
+    """Queue a keypress by name (menu/left/right/minus/plus/filter/pool_spa)."""
     k = (name or "").strip().lower()
     if k not in _KEY_MAP:
         logger.debug(f"controls: unknown key '{name}'")
@@ -102,7 +107,7 @@ def enqueue_key(name: str) -> bool:
     return True
 
 def drain_keypresses() -> None:
-    """Send all queued keypresses to the panel; call this right after a panel update."""
+    """Send all queued keypresses to the panel; call this right after a panel update or from API."""
     global _key_sender
     if _key_sender is None:
         return
