@@ -18,6 +18,7 @@ from aqualogic.keys import Keys
 from .messages import Messages
 from .panelmanager import PanelManager
 from . import controls  # Web/UI controls: key queue + display state
+from .webapp import create_app  # Embedded Flask app for Web UI
 
 logger = logging.getLogger("aqualogic_mqtt.client")
 
@@ -44,6 +45,7 @@ class Client:
         self._panel = AquaLogic(web_port=0)
         # Register low-level key sender so the web/UI can queue button presses
         controls.set_key_sender(self._panel.send_key)
+        controls.register_with_panel(self._panel)  # live LCD feed if available
 
         protocol = mqtt.MQTTv311 if protocol_num == 3 else mqtt.MQTTv5
         self._paho_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
@@ -62,42 +64,95 @@ class Client:
             controls.drain_keypresses()
         except Exception as _e:
             logger.debug(f"controls.drain_keypresses() skipped: {_e}")
+
         logger.debug(f"_panel_changed called... Publishing to {self._formatter.get_state_topic()}...")
+
+        # Helpful debug to see what LCD attributes exist on this panel object
+        try:
+            logger.debug(
+                f"display candidates: display={getattr(panel,'display',None)} "
+                f"lcd_lines={getattr(panel,'lcd_lines',None)} "
+                f"get_lcd_lines={'yes' if hasattr(panel,'get_lcd_lines') else 'no'}"
+            )
+        except Exception:
+            pass
+
         self._pman.observe_system_message(panel.check_system_msg)
         msg = self._formatter.get_state_message(panel, self._pman)
         logger.debug(msg)
+
         # Optional: if display/LED info is available, expose it to the web UI
         try:
-            # The AquaLogic library variants expose different attributes; try common ones.
+            # 1) Try to read native LCD lines from the panel object
             lines = []
             if hasattr(panel, 'lcd_lines') and panel.lcd_lines:
                 lines = list(panel.lcd_lines)
             elif hasattr(panel, 'get_lcd_lines'):
-                lines = list(panel.get_lcd_lines())
-            elif hasattr(panel, 'display') and isinstance(panel.display, (list, tuple)):
-                lines = list(panel.display)
-            # Blink positions (row, col) if available
-            blink = []
-            if hasattr(panel, 'blink_positions'):
-                blink = list(panel.blink_positions) or []
-            # Simple LED map, best-effort from known flags
-            leds = {}
-            try:
-                leds = {
-                    'filter': getattr(panel, 'filter_pump', None) in (True, 'ON'),
-                    'lights': getattr(panel, 'lights', None) in (True, 'ON'),
-                    'spa': getattr(panel, 'spa', None) in (True, 'ON'),
-                    'pool': getattr(panel, 'pool', None) in (True, 'ON'),
-                }
-            except Exception:
+                try:
+                    lines = list(panel.get_lcd_lines())
+                except Exception:
+                    lines = []
+            elif hasattr(panel, 'display') and isinstance(panel.display, (list, tuple)) and any(panel.display):
+                # Some forks keep the raw list in `display`
+                lines = [str(s).replace('\x00', '').rstrip() for s in panel.display][:4]
+
+            # 1.5) Last-ditch pickup: scan attributes for anything that looks like the LCD
+            if not any(lines):
+                for name in dir(panel):
+                    lower = name.lower()
+                    if ('disp' in lower) or ('lcd' in lower):
+                        try:
+                            val = getattr(panel, name)
+                            if isinstance(val, (list, tuple)) and any(val):
+                                cand = [str(s).replace('\x00', '').rstrip() for s in val][:4]
+                                if any(cand):
+                                    lines = cand
+                                    logger.debug(f"Picked LCD from panel.{name} -> {lines!r}")
+                                    break
+                        except Exception:
+                            pass
+
+            if any(lines):
+                # Blink positions (row, col) if available; otherwise keep empty
+                blink = []
+                if hasattr(panel, 'blink_positions'):
+                    try:
+                        blink = list(panel.blink_positions) or []
+                    except Exception:
+                        blink = []
+
+                # Map LEDs with best-effort truthiness from common flags
+                def onish(v):
+                    return v in (True, 'ON', 'On', 'on', '1', 1)
+
                 leds = {}
-            if lines:
-                controls.update_display(lines, blink, leds)
+                try:
+                    leds = {
+                        'filter': onish(getattr(panel, 'filter_pump', getattr(panel, 'f', None))),
+                        'lights': onish(getattr(panel, 'lights', getattr(panel, 'l', None))),
+                        'spa':    onish(getattr(panel, 'spa', None)),
+                        'pool':   onish(getattr(panel, 'pool', None)),
+                        'aux1':   onish(getattr(panel, 'aux1', None)),
+                        'aux2':   onish(getattr(panel, 'aux2', None)),
+                        'aux3':   onish(getattr(panel, 'aux3', None)),
+                        'aux4':   onish(getattr(panel, 'aux4', None)),
+                    }
+                except Exception:
+                    leds = {}
+
+                # Push only when we have native LCD lines so we don't overwrite real display with blanks
+                controls.update_display(lines[:4] + [""] * max(0, 4 - len(lines)), blink, leds)
+                lit_leds = {name: val for name, val in leds.items() if val}
+                logger.debug(f"UI lines={lines!r} blink={blink!r} leds={lit_leds!r}")
+            else:
+                logger.debug("UI: skipping update (no native LCD lines); leaving prior display intact")
+
         except Exception as _e:
             logger.debug(f"controls.update_display skipped: {_e}")
+
         self._paho_client.publish(self._formatter.get_state_topic(), msg)
 
-    # Respond to MQTT events    
+    # Respond to MQTT events
     def _on_message(self, client, userdata, msg):
         logger.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
 
@@ -107,14 +162,14 @@ class Client:
             logger.info("POOL_SPA button pressed via MQTT")
             self._panel.send_key(Keys.POOL_SPA)
             return
-       #  
+        #
         # ALW Handle button press for PLUS
         if msg.topic.endswith("button_plus_set") and msg.payload.decode().strip().lower() in ["press", "on", "1", "true"]:
             from aqualogic.keys import Keys
             logger.info("PLUS button pressed via MQTT")
             self._panel.send_key(Keys.PLUS)
             return
-       #  
+        #
         new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
         for t, m in new_messages:
             self._paho_client.publish(t, m)
@@ -125,9 +180,6 @@ class Client:
             if reason_code.is_failure:
                 logger.critical(f"Got failure when connecting MQTT: {reason_code.getName()}! Exiting!")
                 raise RuntimeError(reason_code)
-            #elif : #FIXME: elif what?
-            #    logger.debug(f"Got unexpected reason_code when connecting MQTT: {reason_code.getName()}")
-            #    logger.debug(reason_code)
         self._disconnect_retry_num = 0
         self._disconnect_retry_wait = 1
 
@@ -138,7 +190,7 @@ class Client:
         logger.debug(self._formatter.get_discovery_message())
         self._paho_client.publish(self._formatter.get_discovery_topic(), self._formatter.get_discovery_message())
         ...
-    
+
     def _on_connect_fail(self, userdata, reason_code):
         #TODO: Have not been able to reach here, needs testing!
         logger.debug("_on_connect_fail called")
@@ -147,9 +199,6 @@ class Client:
         if isinstance(reason_code, ReasonCode):
             if reason_code.is_failure:
                 logger.error(f"MQTT Disconnected: {reason_code.getName()}!")
-                #NOTE: Paho documentation is confusing about loop_forever and reconnection. Will
-                # this ever be called when loop_forever "automatically handles reconnecting"? If not, it 
-                # seems this callback is really only hit on initial connect failures?
                 if self._disconnect_retry_num < self._disconnect_retries:
                     self._disconnect_retry_num += 1
                     self._disconnect_retry_wait = min(self._disconnect_retry_wait*2, self._disconnect_retry_wait_max)
@@ -259,7 +308,14 @@ if __name__ == "__main__":
     ha_group = parser.add_argument_group("Home Assistant options")
     ha_group.add_argument('-p', '--discover-prefix', default="homeassistant", type=str, 
         help="MQTT prefix path (default is \"homeassistant\")")
-        
+
+    web_group = parser.add_argument_group("Web UI options")
+    web_group.add_argument('--http-host', default=os.getenv('AQUALOGIC_HTTP_HOST', '0.0.0.0'), type=str, help='Web UI bind host (default: 0.0.0.0)')
+    web_group.add_argument('--http-port', default=int(os.getenv('AQUALOGIC_HTTP_PORT', '0')), type=int, help='Web UI port; 0 disables (default: 0)')
+    web_group.add_argument('--http-basic-user', default=os.getenv('AQUALOGIC_HTTP_USER'), type=str, help='Basic auth user for Web UI (optional)')
+    web_group.add_argument('--http-basic-pass', default=os.getenv('AQUALOGIC_HTTP_PASS'), type=str, help='Basic auth password for Web UI (optional)')
+    web_group.add_argument('--http-static-dir', default=os.getenv('AQUALOGIC_STATIC_DIR'), type=str, help='Path to static dir (defaults to package static)')
+
     args = parser.parse_args()
 
     print("aqualogic_mqtt Started")
@@ -294,11 +350,21 @@ if __name__ == "__main__":
     #TODO Broker client cert
     if args.mqtt_insecure:
         mqtt_client.mqtt_tls_set(cert_reqs=ssl.CERT_NONE)
+
+    # Start embedded Web UI server (same process -> shared controls state)
+    if args.http_port and args.http_port > 0:
+        try:
+            app = create_app(static_dir=args.http_static_dir, basic_user=args.http_basic_user, basic_pass=args.http_basic_pass)
+            import threading as _threading
+            _t = _threading.Thread(target=lambda: app.run(host=args.http_host, port=args.http_port, debug=False, use_reloader=False), daemon=True)
+            _t.start()
+            print(f"Web UI listening on http://{args.http_host}:{args.http_port}")
+        except Exception as _web_e:
+            print(f"Failed to start Web UI: {_web_e}")
+
     print("Connecting MQTT...")
     mqtt_client.mqtt_connect(dest=dest)
     print("Connecting Controller...")
     mqtt_client.panel_connect(source)
     print("Starting loop...")
     mqtt_client.loop_forever()
-
-    

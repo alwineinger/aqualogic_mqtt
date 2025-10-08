@@ -1,157 +1,205 @@
-<!-- aqualogic_mqtt/static/index.html -->
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <!-- Keep existing viewport and add viewport-fit for iOS safe areas -->
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Aqualogic Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Hayward PL-PLUS Controller</title>
   <style>
-    :root { --bg: #0b0f14; --panel: #101820; --ink: #e5f4ff; --muted: #6f8597; --accent: #38bdf8; }
-    html, body { margin:0; padding:0; background: var(--bg); color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .wrap { max-width: 900px; margin: 0 auto; padding: 20px; }
-    .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-    .card { background: var(--panel); border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,.35); padding: 16px; }
-
-    .lcd {
-      background: #071119;
-      border-radius: 12px;
-      padding: 16px 16px 8px 16px;
-      box-shadow: inset 0 0 12px rgba(0,0,0,.7);
-      min-height: 150px;
-      position: relative;
-      text-align: left;
+    /* MOBILE-FIRST TUNING */
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100svh; /* mobile Safari small viewport height */
+      height: calc(var(--vh, 1vh) * 100); /* JS fallback for iOS */
+      margin: 0;
+      background-color: #e0f7fa;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      -webkit-tap-highlight-color: rgba(0,0,0,0);
+      touch-action: manipulation;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right)
+               env(safe-area-inset-bottom) env(safe-area-inset-left);
     }
-    .lcd .line { white-space: pre; font-size: 20px; line-height: 1.6; letter-spacing: .5px; min-height: 1.6em; display: block; }
-    .blink { animation: blink 1s step-end infinite; text-decoration: underline; }
-    @keyframes blink { 50% { opacity: .2; } }
+    .panel {
+      background-color: #333;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+      text-align: center;
+      width: min(92vw, 480px); /* responsive width, nice on iPhone screens */
+      max-width: 480px;
+    }
+    .display {
+      background-color: #d4edda; /* soft green LCD look */
+      color: #000;
+      padding: clamp(10px, 2vh, 16px);
+      margin-bottom: 12px;
+      font-size: clamp(16px, 2.5vh, 20px);
+      line-height: 1.2;
+      border-radius: 8px;
+      white-space: nowrap;     /* single line */
+      overflow: hidden;
+      text-overflow: ellipsis; /* avoid horizontal cut-off */
+      min-height: 2.2em;
+    }
+    .controls-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 12px;
+      gap: 12px;
+    }
+    .nav-buttons {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      gap: 8px;
+      width: min(60vw, 220px);
+      min-width: 200px;
+      margin: 0;
+    }
+    button {
+      background-color: #00bcd4;
+      border: none;
+      padding: 10px;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+      border-radius: 10px;
+      user-select: none;
+      min-width: 44px;
+      min-height: 44px; /* Apple HIG minimum */
+      font-size: clamp(16px, 2.2vh, 18px);
+    }
+    button:hover { background-color: #0097a7; }
+    .up-button    { grid-column: 2; grid-row: 1; }
+    .left-button  { grid-column: 1; grid-row: 2; }
+    .center-button{ grid-column: 2; grid-row: 2; }
+    .right-button { grid-column: 3; grid-row: 2; }
+    .down-button  { grid-column: 2; grid-row: 3; }
 
-    .leds { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
-    .led { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
-    .dot { width: 10px; height: 10px; border-radius: 999px; background: #223; box-shadow: 0 0 0 2px #223; }
-    .dot.on { background: var(--accent); box-shadow: 0 0 18px var(--accent), 0 0 0 2px #223; }
+    .aux-buttons { display:flex; gap:10px; }
+    .filter-btn button {
+      background-color: #4caf50;
+      padding: 12px 14px;
+    }
+    .filter-btn button:hover { background-color: #3e8e41; }
+    .poolspa-btn button {
+      background-color: #7b5cf0; /* purple-ish to differentiate */
+      padding: 12px 14px;
+    }
+    .poolspa-btn button:hover { background-color: #6a49e6; }
 
-    .keys { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); gap: 12px; }
-    .key { user-select: none; background: #0c1a24; border: 1px solid #163043; border-radius: 12px; padding: 14px 12px; text-align: center; cursor: pointer; font-weight: 600; transition: transform .04s ease, background .15s; }
-    .key:hover { background: #0f2230; }
-    .key:active { transform: translateY(1px); }
+    .status {
+      color: #ddd;
+      font-size: 12px;
+      margin-top: 10px;
+      opacity: .9;
+    }
 
-    .status { color: var(--muted); font-size: 12px; }
-    .toast { position: fixed; right: 16px; bottom: 16px; background: #12212f; color: var(--ink); padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 24px rgba(0,0,0,.35); display:none; }
-
-    .kbd { display:inline-block; border:1px solid #2a3a4a; border-bottom-width:2px; padding: 2px 6px; border-radius:6px; font-size: 12px; color: var(--muted); }
+    /* Very small screens: stack aux buttons under the pad */
+    @media (max-width: 420px) {
+      .controls-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .nav-buttons {
+        width: 100%;
+        min-width: 0;
+      }
+      .aux-buttons { justify-content: space-between; }
+      .aux-buttons button { flex:1; }
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="grid">
-      <div class="card">
-        <div class="lcd" id="lcd">
-          <div class="line" id="l0">&nbsp;</div>
-          <div class="line" id="l1">&nbsp;</div>
-          <div class="line" id="l2">&nbsp;</div>
-          <div class="line" id="l3">&nbsp;</div>
-          <div class="leds" id="leds"></div>
+  <div class="panel">
+    <div class="display" id="display">Heater1 Auto Control</div>
+
+    <div class="controls-row">
+      <div class="nav-buttons">
+        <button class="up-button"     data-k="plus">+</button>
+        <button class="left-button"   data-k="left">&lt;</button>
+        <button class="center-button" data-k="menu">Menu</button>
+        <button class="right-button"  data-k="right">&gt;</button>
+        <button class="down-button"   data-k="minus">−</button>
+      </div>
+
+      <div class="aux-buttons">
+        <div class="filter-btn">
+          <button data-k="filter">Filter</button>
         </div>
-        <div class="keys" style="margin-top:16px">
-          <div class="key" data-k="menu">MENU <span class="kbd">M</span></div>
-          <div class="key" data-k="left">◀ LEFT <span class="kbd">←</span></div>
-          <div class="key" data-k="right">RIGHT ▶ <span class="kbd">→</span></div>
-          <div class="key" data-k="minus">− MINUS <span class="kbd">-</span></div>
-          <div class="key" data-k="plus">PLUS + <span class="kbd">=</span></div>
+        <div class="poolspa-btn">
+          <button data-k="pool_spa">Pool/Spa</button>
         </div>
-        <div class="status" id="status" style="margin-top:8px">Connecting…</div>
       </div>
     </div>
+
+    <div class="status" id="status">Connecting…</div>
   </div>
 
-  <div class="toast" id="toast"></div>
-
   <script>
-  const L = [document.getElementById('l0'), document.getElementById('l1'), document.getElementById('l2'), document.getElementById('l3')];
-  const statusEl = document.getElementById('status');
-  const ledsEl = document.getElementById('leds');
-  const toastEl = document.getElementById('toast');
-
-  function showToast(msg) {
-    toastEl.textContent = msg;
-    toastEl.style.display = 'block';
-    clearTimeout(showToast._t);
-    showToast._t = setTimeout(() => toastEl.style.display = 'none', 1500);
+  // iOS Safari dynamic viewport height fix
+  function setVhUnit(){
+    const vh = window.innerHeight * 0.01;
+    document.documentElement.style.setProperty('--vh', `${vh}px`);
   }
+  window.addEventListener('resize', setVhUnit);
+  window.addEventListener('orientationchange', setVhUnit);
+  setVhUnit();
 
-  function esc(s){
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/ /g,'&nbsp;');
-  }
+  const displayEl = document.getElementById('display');
+  const statusEl  = document.getElementById('status');
 
-  function render(lines, blink, leds) {
-    // Render 4 lines with blinking positions
-    const blSet = new Set((blink||[]).map(([r,c]) => `${r}:${c}`));
-    for (let r=0; r<4; r++) {
-      const line = (lines && lines[r]) ? lines[r] : '';
-      let html = '';
-      for (let c=0; c<Math.max(16, line.length); c++) {
-        const ch = line[c] || ' ';
-        const key = `${r}:${c}`;
-        if (blSet.has(key)) {
-          html += `<span class="blink">${esc(ch)}</span>`;
-        } else {
-          html += esc(ch);
-        }
-      }
-      L[r].innerHTML = html;
-    }
-
-    // LEDs
-    ledsEl.innerHTML = '';
-    if (leds) {
-      Object.keys(leds).sort().forEach(k => {
-        const on = !!leds[k];
-        const div = document.createElement('div');
-        div.className = 'led';
-        div.innerHTML = `<span class="dot ${on ? 'on':''}"></span><span>${k.toUpperCase()}</span>`;
-        ledsEl.appendChild(div);
-      });
-    }
+  function collapseLines(lines) {
+    // Trim each piece, drop NULs, collapse multi-spaces
+    const parts = (lines || [])
+      .filter(Boolean)
+      .map(s => String(s).replace(/\x00/g, '').trim());
+    const text = parts.join(' ').replace(/\s{2,}/g, ' ');
+    return text.trim();
   }
 
   async function poll() {
     try {
-      const res = await fetch('/api/display', {cache:'no-store'});
+      const res = await fetch('/api/display', { cache: 'no-store' });
       if (!res.ok) throw new Error(res.statusText);
       const j = await res.json();
-      render(j.lines, j.blink, j.leds);
-      statusEl.textContent = `Updated ${(new Date(j.updated_at*1000)).toLocaleTimeString()}`;
+      displayEl.textContent = collapseLines(j.lines) || '\u00a0';
+      statusEl.textContent = `Updated ${new Date(j.updated_at * 1000).toLocaleTimeString()}`;
     } catch (e) {
       statusEl.textContent = 'Disconnected';
     } finally {
-      setTimeout(poll, 400);
+      setTimeout(poll, 600);
     }
   }
 
   async function sendKey(k) {
     try {
-      const res = await fetch(`/api/key/${encodeURIComponent(k)}`, {method:'POST'});
-      const j = await res.json();
-      if (!j.ok) throw new Error(j.error||'Failed');
-      showToast(`${k.toUpperCase()} sent`);
-    } catch (e) {
-      showToast(e.message || 'Error');
-    }
+      const res = await fetch(`/api/key/${encodeURIComponent(k)}`, { method: 'POST' });
+      await res.json().catch(()=>{});
+    } catch (_) { /* quiet */ }
   }
 
-  // Button clicks
-  document.querySelectorAll('.key').forEach(btn => {
+  // Click handlers for all buttons
+  document.querySelectorAll('button[data-k]').forEach(btn => {
     btn.addEventListener('click', () => sendKey(btn.dataset.k));
   });
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (desktop convenience)
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
-    if (e.key === 'm' || e.key === 'M') return sendKey('menu');
-    if (e.key === 'ArrowLeft') return sendKey('left');
+    if (e.key === 'ArrowLeft')  return sendKey('left');
     if (e.key === 'ArrowRight') return sendKey('right');
-    if (e.key === '-' ) return sendKey('minus');
+    if (e.key === '-' )         return sendKey('minus');
     if (e.key === '=' || e.key === '+') return sendKey('plus');
+    if (e.key === 'm' || e.key === 'M')  return sendKey('menu');
+    if (e.key === 'p' || e.key === 'P')  return sendKey('pool_spa'); // Pool/Spa shortcut
   });
 
   poll();
