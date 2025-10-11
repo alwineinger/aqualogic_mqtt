@@ -76,6 +76,9 @@
       min-width: 44px;
       min-height: 44px; /* Apple HIG minimum */
       font-size: clamp(16px, 2.2vh, 18px);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
     button:hover { background-color: #0097a7; }
     .up-button    { grid-column: 2; grid-row: 1; }
@@ -115,6 +118,45 @@
       }
       .aux-buttons { justify-content: space-between; }
       .aux-buttons button { flex:1; }
+    }
+
+    /* Portrait phones: make better use of height with larger nav buttons */
+    @media (max-width: 600px) and (orientation: portrait) {
+      body {
+        align-items: stretch;
+      }
+      .panel {
+        width: min(94vw, 420px);
+        margin-inline: auto;
+        padding: clamp(18px, 4vh, 28px);
+      }
+      .controls-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: clamp(14px, 3vh, 24px);
+      }
+      .nav-buttons {
+        width: 100%;
+        min-width: 0;
+        gap: clamp(10px, 2vh, 16px);
+      }
+      .nav-buttons button {
+        aspect-ratio: 1 / 1;
+        padding: clamp(14px, 4vh, 20px);
+        font-size: clamp(18px, 3vh, 22px);
+      }
+      .center-button {
+        padding-inline: clamp(12px, 3vh, 18px);
+        font-size: clamp(16px, 2.6vh, 20px);
+      }
+      .aux-buttons {
+        justify-content: center;
+        gap: clamp(12px, 3vh, 20px);
+      }
+      .aux-buttons button {
+        padding-block: clamp(12px, 2.8vh, 18px);
+        font-size: clamp(16px, 2.6vh, 20px);
+      }
     }
   </style>
 </head>
