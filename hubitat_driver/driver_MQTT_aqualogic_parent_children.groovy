@@ -277,28 +277,30 @@ def parse(String description) {
 
     // === Mapping to parent AND children ===
 
+    Map childCache = childMapBySuffix()
+
     // Numeric telemetry
-    setNum("temperature",   payload.t_p, "°F");     sendChildEvt("tpool", "temperature", payload.t_p, "°F")
-    setNum("spaTemperature",payload.t_s, "°F");     sendChildEvt("tspa",  "temperature", payload.t_s, "°F")
-    setNum("airTemperature",payload.t_a, "°F");     sendChildEvt("tair",  "temperature", payload.t_a, "°F")
+    setNum("temperature",   payload.t_p, "°F");     sendChildEvt("tpool", "temperature", payload.t_p, "°F", childCache)
+    setNum("spaTemperature",payload.t_s, "°F");     sendChildEvt("tspa",  "temperature", payload.t_s, "°F", childCache)
+    setNum("airTemperature",payload.t_a, "°F");     sendChildEvt("tair",  "temperature", payload.t_a, "°F", childCache)
     setNum("salt",          payload.salt, "ppm")
     setNum("chlorinePool",  payload.cl_p, "%")
     setNum("chlorineSpa",   payload.cl_s, "%")
     setNum("pumpSpeed",     payload.s_p, "%")
-    setNum("power",         payload.p_p, "W");      sendChildEvt("pwr",   "power",      payload.p_p, "W")
+    setNum("power",         payload.p_p, "W");      sendChildEvt("pwr",   "power",      payload.p_p, "W", childCache)
 
     // Strings/system
     setStr("systemMessage", payload.sysm)
     setStr("cellStatus",    payload.cs)
 
     // Binary flags -> parent attr + child switch state
-    setBin("filter",          payload.f);     sendChildEvt("filter", "switch", onOff(payload.f))
-    setBin("light",           payload.l);     sendChildEvt("light",  "switch", onOff(payload.l))
+    setBin("filter",          payload.f);     sendChildEvt("filter", "switch", onOff(payload.f), null, childCache)
+    setBin("light",           payload.l);     sendChildEvt("light",  "switch", onOff(payload.l), null, childCache)
 
     ["aux1","aux2","aux3","aux4","spill","v3","v4","h1","hauto","sc","pool","spa"].each { key ->
         def val = payload[key]
         setBin(key as String, val)
-        sendChildEvt(key as String, "switch", onOff(val))
+        sendChildEvt(key as String, "switch", onOff(val), null, childCache)
     }
 }
 
@@ -477,9 +479,26 @@ private void ensureChild(String suffix, String typeName, String label) {
     }
 }
 
+/** Build a suffix -> child device cache for quick lookups. */
+private Map<String, Object> childMapBySuffix() {
+    Map<String, Object> cache = [:]
+    childDevices?.each { cd ->
+        String suffix = suffixFromChild(cd)
+        if (suffix) cache[suffix] = cd
+    }
+    return cache
+}
+
 /** Deliver event to child using the Generic Component convention. */
-private void sendChildEvt(String suffix, String name, Object value, String unit=null) {
-    def cd = getChildDevice(childDni(suffix))
+private void sendChildEvt(String suffix, String name, Object value, String unit=null, Object childOrMap=null) {
+    def cd = null
+    if (childOrMap instanceof Map) {
+        cd = childOrMap[suffix]
+    } else if (childOrMap) {
+        cd = childOrMap
+    } else {
+        cd = getChildDevice(childDni(suffix))
+    }
     if (!cd) return
     Map evt = [name: name, value: value]
     if (unit) evt.unit = unit
@@ -489,6 +508,29 @@ private void sendChildEvt(String suffix, String name, Object value, String unit=
     } catch (Exception e) {
         if (logEnable) log.warn "Child ${suffix} parse failed: ${e.message}"
         try { cd.sendEvent(evt) } catch (ignored) {}
+    }
+}
+
+private void emitChildCurrentValue(String suffix, Map childCache) {
+    switch (suffix) {
+        case 'tpool':   sendChildEvt('tpool','temperature', device.currentValue('temperature'), '°F', childCache); break
+        case 'tspa':    sendChildEvt('tspa','temperature', device.currentValue('spaTemperature'), '°F', childCache); break
+        case 'tair':    sendChildEvt('tair','temperature', device.currentValue('airTemperature'), '°F', childCache); break
+        case 'pwr':     sendChildEvt('pwr','power',        device.currentValue('power'), 'W', childCache); break
+        case 'filter':  sendChildEvt('filter','switch',    device.currentValue('filter'), null, childCache); break
+        case 'light':   sendChildEvt('light','switch',     device.currentValue('light'), null, childCache); break
+        case 'aux1':    sendChildEvt('aux1','switch',      device.currentValue('aux1'), null, childCache); break
+        case 'aux2':    sendChildEvt('aux2','switch',      device.currentValue('aux2'), null, childCache); break
+        case 'aux3':    sendChildEvt('aux3','switch',      device.currentValue('aux3'), null, childCache); break
+        case 'aux4':    sendChildEvt('aux4','switch',      device.currentValue('aux4'), null, childCache); break
+        case 'spill':   sendChildEvt('spill','switch',     device.currentValue('spill'), null, childCache); break
+        case 'v3':      sendChildEvt('v3','switch',        device.currentValue('valve3'), null, childCache); break
+        case 'v4':      sendChildEvt('v4','switch',        device.currentValue('valve4'), null, childCache); break
+        case 'h1':      sendChildEvt('h1','switch',        device.currentValue('heater1'), null, childCache); break
+        case 'hauto':   sendChildEvt('hauto','switch',     device.currentValue('heaterAuto'), null, childCache); break
+        case 'sc':      sendChildEvt('sc','switch',        device.currentValue('superChlorinate'), null, childCache); break
+        case 'pool':    sendChildEvt('pool','switch',      device.currentValue('pool'), null, childCache); break
+        case 'spa':     sendChildEvt('spa','switch',       device.currentValue('spa'), null, childCache); break
     }
 }
 
@@ -526,28 +568,10 @@ private void mqttPublish(String topic, String payload) {
 
 void componentRefresh(cd){
     if (logEnable) log.debug "componentRefresh from ${cd.displayName}"
+    Map childCache = childMapBySuffix()
     def suffix = suffixFromChild(cd)
     if (!suffix) return
-    switch (suffix) {
-        case 'tpool':   sendChildEvt('tpool','temperature', device.currentValue('temperature'), '°F'); break
-        case 'tspa':    sendChildEvt('tspa','temperature', device.currentValue('spaTemperature'), '°F'); break
-        case 'tair':    sendChildEvt('tair','temperature', device.currentValue('airTemperature'), '°F'); break
-        case 'pwr':     sendChildEvt('pwr','power',        device.currentValue('power'), 'W'); break
-        case 'filter':  sendChildEvt('filter','switch',    device.currentValue('filter')); break
-        case 'light':   sendChildEvt('light','switch',     device.currentValue('light')); break
-        case 'aux1':    sendChildEvt('aux1','switch',      device.currentValue('aux1')); break
-        case 'aux2':    sendChildEvt('aux2','switch',      device.currentValue('aux2')); break
-        case 'aux3':    sendChildEvt('aux3','switch',      device.currentValue('aux3')); break
-        case 'aux4':    sendChildEvt('aux4','switch',      device.currentValue('aux4')); break
-        case 'spill':   sendChildEvt('spill','switch',     device.currentValue('spill')); break
-        case 'v3':      sendChildEvt('v3','switch',        device.currentValue('valve3')); break
-        case 'v4':      sendChildEvt('v4','switch',        device.currentValue('valve4')); break
-        case 'h1':      sendChildEvt('h1','switch',        device.currentValue('heater1')); break
-        case 'hauto':   sendChildEvt('hauto','switch',     device.currentValue('heaterAuto')); break
-        case 'sc':      sendChildEvt('sc','switch',        device.currentValue('superChlorinate')); break
-        case 'pool':    sendChildEvt('pool','switch',      device.currentValue('pool')); break
-        case 'spa':     sendChildEvt('spa','switch',       device.currentValue('spa')); break
-    }
+    emitChildCurrentValue(suffix, childCache)
     sendEvent(name: "lastChildEvent", value: new Date().format("yyyy-MM-dd HH:mm:ss"))
 }
 
@@ -593,8 +617,18 @@ void testInject() {
 
 // Push the current parent values to all children
 private void pushCurrentToChildren() {
+    Map childCache = childMapBySuffix()
+    if (!childCache) return
+
+    boolean anySent = false
     ["tpool","tspa","tair","pwr","filter","light","aux1","aux2","aux3","aux4","spill","v3","v4","h1","hauto","sc","pool","spa"].each { s ->
-        def cd = getChildDevice(childDni(s))
-        if (cd) componentRefresh(cd)
+        if (childCache[s]) {
+            emitChildCurrentValue(s, childCache)
+            anySent = true
+        }
+    }
+
+    if (anySent) {
+        sendEvent(name: "lastChildEvent", value: new Date().format("yyyy-MM-dd HH:mm:ss"))
     }
 }
