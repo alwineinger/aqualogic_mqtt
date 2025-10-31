@@ -388,26 +388,76 @@ private String onOff(def v) {
 }
 
 private void setNum(String name, def v, String unit = null) {
-    if (v == null) return
-    def num = (v instanceof Number) ? v : safeToBigDecimal(v)
+    BigDecimal num = safeToBigDecimal(v)
     if (num == null) return
+    if (!valueChanged(name, num, unit)) return
     Map evt = [name: name, value: num]
     if (unit) evt.unit = unit
     sendEvent(evt)
 }
 
 private BigDecimal safeToBigDecimal(def v) {
+    if (v == null) return null
     try { return v as BigDecimal } catch (ignored) { return null }
 }
 
 private void setStr(String name, def v) {
     if (v == null) return
-    sendEvent(name: name, value: v.toString())
+    String value = v.toString()
+    if (!valueChanged(name, value)) return
+    sendEvent(name: name, value: value)
 }
 
 private void setBin(String name, def v) {
     if (v == null) return
-    sendEvent(name: name, value: onOff(v))
+    String value = onOff(v)
+    if (value == null) return
+    if (!valueChanged(name, value)) return
+    sendEvent(name: name, value: value)
+}
+
+private boolean valueChanged(String name, Object newValue, String unit = null) {
+    if (newValue == null) return false
+    Object currentValue = device.currentValue(name)
+    def state = device.currentState(name)
+    Object normalizedNew = normalizeForComparison(newValue)
+    Object normalizedCurrent = normalizeForComparison(currentValue)
+
+    boolean valuesEqual
+    if (normalizedNew == null && normalizedCurrent == null) {
+        valuesEqual = true
+    } else if (normalizedNew != null) {
+        valuesEqual = (normalizedNew == normalizedCurrent) || normalizedNew.equals(normalizedCurrent)
+    } else {
+        valuesEqual = false
+    }
+
+    if (!valuesEqual) {
+        return true
+    }
+
+    if (unit != null) {
+        String currentUnit = state?.unit
+        return currentUnit != unit
+    }
+
+    return false
+}
+
+private Object normalizeForComparison(Object value) {
+    if (value == null) return null
+    if (value instanceof Number) {
+        BigDecimal bd = safeToBigDecimal(value)
+        return bd != null ? bd.stripTrailingZeros() : value
+    }
+    String s = value.toString()
+    String trimmed = s?.trim()
+    if (!trimmed) return ""
+    BigDecimal numeric = safeToBigDecimal(trimmed)
+    if (numeric != null) {
+        return numeric.stripTrailingZeros()
+    }
+    return trimmed
 }
 
 // ---- Child helpers ----
