@@ -256,8 +256,22 @@ class Client:
         finally:
             self._paho_client.loop_stop()
             pass
-        
-        
+
+
+# ---- Module-level refs for HAL API access (populated at runtime) ----
+_panel_ref = None
+_pman_ref = None
+
+
+def get_panel():
+    """Return the AquaLogic panel instance if available."""
+    return _panel_ref
+
+
+def get_panel_manager():
+    """Return the PanelManager instance if available."""
+    return _pman_ref
+
 
 if __name__ == "__main__":
     autodisc_prefix = None
@@ -355,6 +369,16 @@ if __name__ == "__main__":
     if args.http_port and args.http_port > 0:
         try:
             app = create_app(static_dir=args.http_static_dir, basic_user=args.http_basic_user, basic_pass=args.http_basic_pass)
+            # Inject panel and PanelManager references for HAL structured API endpoints
+            try:
+                app.config['PANEL'] = mqtt_client._panel
+                app.config['PANEL_MANAGER'] = pman
+                # Also expose module-level refs for testing/embedding
+                import aqualogic_mqtt.client as _clmod
+                _clmod._panel_ref = mqtt_client._panel
+                _clmod._pman_ref = pman
+            except Exception as _inj_e:
+                print(f"Warning: could not inject panel/pman refs: {_inj_e}")
             import threading as _threading
             _t = _threading.Thread(target=lambda: app.run(host=args.http_host, port=args.http_port, debug=False, use_reloader=False), daemon=True)
             _t.start()
