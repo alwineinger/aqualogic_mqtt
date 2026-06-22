@@ -31,6 +31,7 @@ ROW_DEFS = [
     ("filterState", "Filter"),
     ("pumpSpeedPct", "Pump Speed"),
     ("pumpSpeedName", "Pump Preset"),
+    ("spaCountdown", "Spa Countdown"),
     ("systemMsg", "System"),
     ("controllerClock", "Controller Clock"),
 ]
@@ -168,9 +169,18 @@ class DefaultMenuCache:
             normalize_led_name(key): truthy_led(value)
             for key, value in (leds or {}).items()
         }
-        if normalized.get("SPA") is True:
+        spa_on = normalized.get("SPA") is True
+        pool_on = normalized.get("POOL") is True
+        spill_on = (
+            normalized.get("SPILLOVER") is True
+            or normalized.get("SPILL") is True
+            or normalized.get("SPA_OVERFLOW") is True
+        )
+        if spill_on or (spa_on and pool_on):
+            self._set_value_locked("poolSpaMode", "Mode", "spa_overflow", "Spa Overflow", None, "led:spillover", ts)
+        elif spa_on:
             self._set_value_locked("poolSpaMode", "Mode", "spa", "Spa", None, "led:spa", ts)
-        elif normalized.get("POOL") is True:
+        elif pool_on:
             self._set_value_locked("poolSpaMode", "Mode", "pool", "Pool", None, "led:pool", ts)
 
         if "FILTER" in normalized and normalized["FILTER"] is not None:
@@ -220,11 +230,10 @@ class DefaultMenuCache:
             self._set_value_locked("heaterRun", "Heater Output", state == "On", state, None, line, ts)
             return
 
-        match = re.match(r"^(?:Filter|VSP)\s+Speed\s+(\d+)\s*%(?:\s+(?:(?:Speed|Spd)\s*([1-4])|(?:Speed|Spd)([1-4])))?", line, re.I)
+        match = re.match(r"^(?:Filter|VSP)\s+Speed\s+(\d+)\s*%(?:\s+(.+))?$", line, re.I)
         if match:
             pct = int(match.group(1))
-            speed_num = match.group(2) or match.group(3)
-            speed_name = f"Speed{speed_num}" if speed_num else None
+            speed_name = self._normalize_pump_preset(match.group(2))
             self._set_value_locked("filterState", "Filter", True, "On", None, line, ts)
             self._set_value_locked("pumpSpeedPct", "Pump Speed", pct, f"{pct}%", "%", line, ts)
             if speed_name:
@@ -248,6 +257,14 @@ class DefaultMenuCache:
         if match:
             display = f"{match.group(1).capitalize()} {match.group(2).strip()}".strip()
             self._set_value_locked("controllerClock", "Controller Clock", display, display, None, line, ts)
+            return
+
+        match = re.match(r"^Spa\s*-\s*CountDn\s*(.*)$", line, re.I)
+        if match:
+            value = match.group(1).strip() or "Active"
+            display = f"Spa CountDn {value}".strip()
+            self._set_value_locked("spaCountdown", "Spa Countdown", value, display, None, line, ts)
+            self._set_value_locked("poolSpaMode", "Mode", "spa", "Spa", None, line, ts)
             return
 
         if line.lower().startswith("check system"):
@@ -350,6 +367,8 @@ class DefaultMenuCache:
             return "filter_speed"
         if lower.startswith("filter on"):
             return "filter_speed_change"
+        if re.match(r"^spa\s*-\s*countdn\b", lower):
+            return "spa_countdown"
         if lower.startswith("check system"):
             return "check_system"
         if WEEKDAY_RE.match(line):
@@ -362,3 +381,15 @@ class DefaultMenuCache:
             if key in leds:
                 return leds[key]
         return None
+
+    @staticmethod
+    def _normalize_pump_preset(value: Optional[str]) -> Optional[str]:
+        text = normalize_line(value)
+        if not text:
+            return None
+        match = re.match(r"^(?:Speed|Spd)\s*([1-4])$", text, re.I)
+        if match:
+            return f"Speed{match.group(1)}"
+        if re.match(r"^Spa\s+Mode$", text, re.I):
+            return "Spa Mode"
+        return text

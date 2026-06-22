@@ -69,6 +69,34 @@ class DefaultMenuCacheTest(unittest.TestCase):
         self.assertFalse(snapshot["values"]["poolTempF"]["fresh"])
         self.assertEqual(snapshot["values"]["poolTempF"]["stale_reason"], "stale")
 
+    def test_mode_uses_spillover_leds(self):
+        cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: 100.0)
+
+        cache.observe_display([], leds={"POOL": True, "SPA": True}, observed_at=100.0)
+        self.assertEqual(cache.as_dict()["values"]["poolSpaMode"]["display"], "Spa Overflow")
+
+        cache.observe_display([], leds={"SPILLOVER": True}, observed_at=101.0)
+        self.assertEqual(cache.as_dict()["values"]["poolSpaMode"]["value"], "spa_overflow")
+
+    def test_spa_mode_pump_preset_is_recognized(self):
+        cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: 100.0)
+
+        cache.observe_display(["Filter Speed 95% Spa Mode"], observed_at=100.0)
+        snapshot = cache.as_dict()
+
+        self.assertEqual(snapshot["values"]["pumpSpeedPct"]["value"], 95)
+        self.assertEqual(snapshot["values"]["pumpSpeedName"]["value"], "Spa Mode")
+
+    def test_spa_countdown_screen_is_recognized(self):
+        cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: 100.0)
+
+        cache.observe_display(["Spa-CountDn 00:24"], observed_at=100.0)
+        snapshot = cache.as_dict()
+
+        self.assertEqual(snapshot["values"]["spaCountdown"]["value"], "00:24")
+        self.assertEqual(snapshot["values"]["poolSpaMode"]["display"], "Spa")
+        self.assertIn("spa_countdown", snapshot["pages"])
+
 
 if __name__ == "__main__":
     unittest.main()

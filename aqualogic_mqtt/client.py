@@ -83,6 +83,32 @@ class Client:
 
         # Optional: if display/LED info is available, expose it to the web UI
         try:
+            # Map LEDs with best-effort truthiness from panel state flags.
+            def onish(v):
+                return v in (True, 'ON', 'On', 'on', '1', 1)
+
+            def state_on(state):
+                try:
+                    return bool(panel.get_state(state))
+                except Exception:
+                    return False
+
+            try:
+                leds = {
+                    'filter': state_on(States.FILTER) or onish(getattr(panel, 'filter_pump', getattr(panel, 'f', None))),
+                    'lights': state_on(States.LIGHTS) or onish(getattr(panel, 'lights', getattr(panel, 'l', None))),
+                    'spa': state_on(States.SPA) or onish(getattr(panel, 'spa', None)),
+                    'pool': state_on(States.POOL) or onish(getattr(panel, 'pool', None)),
+                    'spillover': state_on(States.SPILLOVER) or onish(getattr(panel, 'spillover', getattr(panel, 'spill', None))),
+                    'heater_1': state_on(States.HEATER_1) or onish(getattr(panel, 'heater_1', getattr(panel, 'h1', None))),
+                    'aux1': state_on(States.AUX_1) or onish(getattr(panel, 'aux1', None)),
+                    'aux2': state_on(States.AUX_2) or onish(getattr(panel, 'aux2', None)),
+                    'aux3': state_on(States.AUX_3) or onish(getattr(panel, 'aux3', None)),
+                    'aux4': state_on(States.AUX_4) or onish(getattr(panel, 'aux4', None)),
+                }
+            except Exception:
+                leds = {}
+
             # 1) Try to read native LCD lines from the panel object
             lines = []
             if hasattr(panel, 'lcd_lines') and panel.lcd_lines:
@@ -121,31 +147,14 @@ class Client:
                     except Exception:
                         blink = []
 
-                # Map LEDs with best-effort truthiness from common flags
-                def onish(v):
-                    return v in (True, 'ON', 'On', 'on', '1', 1)
-
-                leds = {}
-                try:
-                    leds = {
-                        'filter': onish(getattr(panel, 'filter_pump', getattr(panel, 'f', None))),
-                        'lights': onish(getattr(panel, 'lights', getattr(panel, 'l', None))),
-                        'spa':    onish(getattr(panel, 'spa', None)),
-                        'pool':   onish(getattr(panel, 'pool', None)),
-                        'aux1':   onish(getattr(panel, 'aux1', None)),
-                        'aux2':   onish(getattr(panel, 'aux2', None)),
-                        'aux3':   onish(getattr(panel, 'aux3', None)),
-                        'aux4':   onish(getattr(panel, 'aux4', None)),
-                    }
-                except Exception:
-                    leds = {}
-
                 # Push only when we have native LCD lines so we don't overwrite real display with blanks
                 controls.update_display(lines[:4] + [""] * max(0, 4 - len(lines)), blink, leds)
                 lit_leds = {name: val for name, val in leds.items() if val}
                 logger.debug(f"UI lines={lines!r} blink={blink!r} leds={lit_leds!r}")
             else:
-                logger.debug("UI: skipping update (no native LCD lines); leaving prior display intact")
+                controls.update_display(None, None, leds)
+                lit_leds = {name: val for name, val in leds.items() if val}
+                logger.debug(f"UI LEDs={lit_leds!r}; no native LCD lines, leaving prior display text intact")
 
         except Exception as _e:
             logger.debug(f"controls.update_display skipped: {_e}")
