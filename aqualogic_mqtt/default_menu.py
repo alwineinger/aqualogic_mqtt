@@ -221,13 +221,10 @@ class DefaultMenuCache:
             self._set_value_locked("saltPpm", "Salt", value, f"{value} ppm", "ppm", line, ts)
             return
 
-        match = re.match(r"^Heater1\s+(?:(Manual|Auto)\s+)?(On|Off)$", line, re.I)
+        match = re.match(r"^Heater1\s+(.+)$", line, re.I)
         if match:
-            mode = (match.group(1) or "").strip()
-            state = match.group(2).capitalize()
-            display = f"{mode} {state}".strip()
+            display = normalize_line(match.group(1))
             self._set_value_locked("heater1Status", "Heater1", display, display, None, line, ts)
-            self._set_value_locked("heaterRun", "Heater Output", state == "On", state, None, line, ts)
             return
 
         match = re.match(r"^(?:Filter|VSP)\s+Speed\s+(\d+)\s*%(?:\s+(.+))?$", line, re.I)

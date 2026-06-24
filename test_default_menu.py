@@ -97,6 +97,37 @@ class DefaultMenuCacheTest(unittest.TestCase):
         self.assertEqual(snapshot["values"]["poolSpaMode"]["display"], "Spa")
         self.assertIn("spa_countdown", snapshot["pages"])
 
+    def test_heater_status_comes_from_screen_and_output_from_led(self):
+        cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: 100.0)
+
+        cache.observe_display(
+            ["Heater1 Auto Control"],
+            leds={"HEATER1": False},
+            observed_at=100.0,
+        )
+        snapshot = cache.as_dict()
+
+        self.assertEqual(snapshot["values"]["heater1Status"]["value"], "Auto Control")
+        self.assertEqual(snapshot["values"]["heater1Status"]["display"], "Auto Control")
+        self.assertEqual(snapshot["values"]["heaterRun"]["value"], False)
+        self.assertEqual(snapshot["values"]["heaterRun"]["display"], "Off")
+        self.assertEqual(snapshot["values"]["heaterRun"]["raw"], "led:heater")
+
+    def test_heater_screen_does_not_overwrite_led_output(self):
+        cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: 100.0)
+
+        cache.observe_display(
+            ["Heater1 Manual Off"],
+            leds={"HEATER1": True},
+            observed_at=100.0,
+        )
+        snapshot = cache.as_dict()
+
+        self.assertEqual(snapshot["values"]["heater1Status"]["value"], "Manual Off")
+        self.assertEqual(snapshot["values"]["heaterRun"]["value"], True)
+        self.assertEqual(snapshot["values"]["heaterRun"]["display"], "On")
+        self.assertEqual(snapshot["values"]["heaterRun"]["raw"], "led:heater")
+
 
 if __name__ == "__main__":
     unittest.main()
