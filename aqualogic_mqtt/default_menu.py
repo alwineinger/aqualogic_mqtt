@@ -143,12 +143,14 @@ class DefaultMenuCache:
         now = self._clock()
         with self._lock:
             rows = [
-                self._row_for_value_locked(key, label, now)
+                row
                 for key, label in ROW_DEFS
+                if (row := self._row_for_value_locked(key, label, now)) is not None
             ]
             pages = {
-                key: self._with_freshness(dict(page), now)
+                key: enriched
                 for key, page in sorted(self._pages.items())
+                if (enriched := self._with_freshness(dict(page), now)) is not None
             }
             missing_groups = self._missing_groups_locked(now)
             complete = not missing_groups
@@ -163,8 +165,9 @@ class DefaultMenuCache:
                 "last_complete_cycle_at": self._last_complete_cycle_at,
                 "missing_groups": missing_groups,
                 "values": {
-                    key: self._with_freshness(dict(value), now)
+                    key: enriched
                     for key, value in sorted(self._values.items())
+                    if (enriched := self._with_freshness(dict(value), now)) is not None
                 },
                 "rows": rows,
                 "pages": pages,
@@ -301,7 +304,7 @@ class DefaultMenuCache:
             "observed_at": ts,
         }
 
-    def _row_for_value_locked(self, key: str, label: str, now: float) -> dict:
+    def _row_for_value_locked(self, key: str, label: str, now: float) -> Optional[dict]:
         value = self._values.get(key)
         if value is None:
             return {
@@ -318,7 +321,7 @@ class DefaultMenuCache:
             }
         return self._with_freshness(dict(value), now)
 
-    def _with_freshness(self, item: dict, now: float) -> dict:
+    def _with_freshness(self, item: dict, now: float) -> Optional[dict]:
         observed_at = item.get("observed_at")
         if observed_at is None:
             item["age_sec"] = None
@@ -339,17 +342,10 @@ class DefaultMenuCache:
             item["fresh"] = True
             item["stale_reason"] = None
 
-        # 3-minute staleness removal: drop value, display ("reading"), and age_sec
-        # while leaving observed_at for callers that may need a last-seen timestamp.
-        # Write path (observe_display) always passes now, so newly observed data
-        # has age ~0 and is never removed at store time.
         if age > STALE_DATA_REMOVE_AFTER_SEC:
-            item["value"] = None
-            item["display"] = None
-            item["age_sec"] = None
-        else:
-            item["age_sec"] = age
+            return None  # drop the entry entirely
 
+        item["age_sec"] = age
         return item
 
     def _missing_groups_locked(self, now: float) -> List[str]:
@@ -366,7 +362,10 @@ class DefaultMenuCache:
         value = self._values.get(key)
         if not value:
             return False
-        return self._with_freshness(dict(value), now)["fresh"]
+        enriched = self._with_freshness(dict(value), now)
+        if enriched is None:
+            return False
+        return enriched["fresh"]
 
     def _page_key_for_line(self, line: str) -> str:
         lower = line.lower()

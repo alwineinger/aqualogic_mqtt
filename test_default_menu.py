@@ -137,46 +137,87 @@ class StalenessRemovalTest(unittest.TestCase):
     """3-minute removal threshold tests for value/display/age_sec in webUI payload."""
 
     def test_value_under_3min_is_present(self):
-        # age ~ 90s < 180s => value, display ("reading"), and age_sec are populated
+        # age ~ 90s < 180s => entry present in values, rows, and pages
         now = 190.0
         cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: now)
         cache.observe_display(["Pool Temp 78°F"], observed_at=100.0)
 
-        v = cache.as_dict()["values"]["poolTempF"]
+        snapshot = cache.as_dict()
+        self.assertIn("poolTempF", snapshot["values"])
+        v = snapshot["values"]["poolTempF"]
         self.assertEqual(v["value"], 78)
         self.assertEqual(v["display"], "78F")
         self.assertAlmostEqual(v["age_sec"], 90.0, places=1)
         self.assertIsNotNone(v["observed_at"])
 
-    def test_value_over_3min_has_value_display_age_removed(self):
-        # age ~ 300s > 180s => value/display/age cleared for poolTempF;
+        # row present
+        rows = snapshot["rows"]
+        self.assertIn("poolTempF", [r.get("key") for r in rows])
+
+        # page present
+        self.assertIn("pool_temp", snapshot["pages"])
+
+    def test_value_over_3min_is_dropped(self):
+        # age ~ 300s > 180s => entry fully dropped for poolTempF;
         # a later sample remains unaffected
         now = 400.0
         cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: now)
         cache.observe_display(["Pool Temp 78°F"], observed_at=100.0)
         cache.observe_display(["Air Temp 71°F"], observed_at=350.0)
 
-        vals = cache.as_dict()["values"]
-        stale = vals["poolTempF"]
-        fresh = vals["ambientF"]
+        snapshot = cache.as_dict()
+        vals = snapshot["values"]
 
-        self.assertIsNone(stale["value"])
-        self.assertIsNone(stale["display"])
-        self.assertIsNone(stale["age_sec"])
-        self.assertIsNotNone(stale.get("observed_at"))
+        # stale entry fully absent from values dict
+        self.assertNotIn("poolTempF", vals)
+
+        # stale entry absent from rows array
+        self.assertNotIn("poolTempF", [r.get("key") for r in snapshot["rows"]])
+
+        # stale entry absent from pages dict (page_key for pool temp is "pool_temp")
+        self.assertNotIn("pool_temp", snapshot["pages"])
+
+        # fresh entry still present
+        fresh = vals["ambientF"]
         self.assertEqual(fresh["value"], 71)
         self.assertEqual(fresh["display"], "71F")
 
     def test_value_exactly_at_3min_is_kept(self):
-        # Threshold is strict ">"; exactly 180s still returns data.
+        # Threshold is strict ">"; exactly 180s still returns data with full shape.
         now = 280.0
         cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: now)
         cache.observe_display(["Pool Temp 78°F"], observed_at=100.0)
 
-        v = cache.as_dict()["values"]["poolTempF"]
+        snapshot = cache.as_dict()
+
+        self.assertIn("poolTempF", snapshot["values"])
+        v = snapshot["values"]["poolTempF"]
         self.assertEqual(v["value"], 78)
         self.assertEqual(v["display"], "78F")
         self.assertAlmostEqual(v["age_sec"], 180.0, places=1)
+
+        self.assertIn("poolTempF", [r.get("key") for r in snapshot["rows"]])
+        self.assertIn("pool_temp", snapshot["pages"])
+
+    def test_boundary_180_present_181_absent(self):
+        # Explicit boundary: age_sec == 180 is kept; age_sec == 181 is dropped (strict >)
+        # all three collections: values, rows, pages
+
+        # 180s: present everywhere
+        cache180 = DefaultMenuCache(stale_after_sec=45, clock=lambda: 280.0)
+        cache180.observe_display(["Pool Temp 78°F"], observed_at=100.0)
+        s180 = cache180.as_dict()
+        self.assertIn("poolTempF", s180["values"])
+        self.assertIn("poolTempF", [r.get("key") for r in s180["rows"]])
+        self.assertIn("pool_temp", s180["pages"])
+
+        # 181s: absent everywhere
+        cache181 = DefaultMenuCache(stale_after_sec=45, clock=lambda: 281.0)
+        cache181.observe_display(["Pool Temp 78°F"], observed_at=100.0)
+        s181 = cache181.as_dict()
+        self.assertNotIn("poolTempF", s181["values"])
+        self.assertNotIn("poolTempF", [r.get("key") for r in s181["rows"]])
+        self.assertNotIn("pool_temp", s181["pages"])
 
 
 if __name__ == "__main__":
