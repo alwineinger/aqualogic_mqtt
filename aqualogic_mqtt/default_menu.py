@@ -186,7 +186,7 @@ class DefaultMenuCache:
             or normalized.get("SPA_OVERFLOW") is True
         )
         if spill_on or (spa_on and pool_on):
-            self._set_value_locked("poolSpaMode", "Mode", "spa_overflow", "Spa Overflow", None, "led:spillover", ts)
+            self._set_value_locked("poolSpaMode", "Mode", "spa_overflow", "Spa Spillover", None, "led:spillover", ts)
         elif spa_on:
             self._set_value_locked("poolSpaMode", "Mode", "spa", "Spa", None, "led:spa", ts)
         elif pool_on:

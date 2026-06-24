@@ -77,7 +77,7 @@ class DefaultMenuCacheTest(unittest.TestCase):
         cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: 100.0)
 
         cache.observe_display([], leds={"POOL": True, "SPA": True}, observed_at=100.0)
-        self.assertEqual(cache.as_dict()["values"]["poolSpaMode"]["display"], "Spa Overflow")
+        self.assertEqual(cache.as_dict()["values"]["poolSpaMode"]["display"], "Spa Spillover")
 
         cache.observe_display([], leds={"SPILLOVER": True}, observed_at=101.0)
         self.assertEqual(cache.as_dict()["values"]["poolSpaMode"]["value"], "spa_overflow")
