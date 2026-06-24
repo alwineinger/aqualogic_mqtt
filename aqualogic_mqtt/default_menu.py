@@ -9,6 +9,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 DEFAULT_STALE_AFTER_SEC = float(os.getenv("AQUALOGIC_DEFAULT_MENU_STALE_SEC", "45"))
 
+# After this many seconds without a fresh sample, the public payload omits
+# value/display/age_sec for that entry (reported as null). Internal timestamps remain.
+STALE_DATA_REMOVE_AFTER_SEC = float(
+    os.getenv("AQUALOGIC_DEFAULT_MENU_DATA_REMOVE_SEC", "180")
+)
+
 STATE_CHANGING_KEYS = {
     "plus",
     "minus",
@@ -332,6 +338,18 @@ class DefaultMenuCache:
         else:
             item["fresh"] = True
             item["stale_reason"] = None
+
+        # 3-minute staleness removal: drop value, display ("reading"), and age_sec
+        # while leaving observed_at for callers that may need a last-seen timestamp.
+        # Write path (observe_display) always passes now, so newly observed data
+        # has age ~0 and is never removed at store time.
+        if age > STALE_DATA_REMOVE_AFTER_SEC:
+            item["value"] = None
+            item["display"] = None
+            item["age_sec"] = None
+        else:
+            item["age_sec"] = age
+
         return item
 
     def _missing_groups_locked(self, now: float) -> List[str]:

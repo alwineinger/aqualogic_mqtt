@@ -60,7 +60,9 @@ class DefaultMenuCacheTest(unittest.TestCase):
         self.assertFalse(snapshot["complete"])
 
     def test_age_marks_values_stale(self):
-        now = 200.0
+        # Freshness stale threshold is 10s; age 90s < removal threshold 180s,
+        # so value/display/age remain present even while comfort-fresh is False.
+        now = 190.0
         cache = DefaultMenuCache(stale_after_sec=10, clock=lambda: now)
         cache.observe_display(["Pool Temp 84°F"], observed_at=100.0)
 
@@ -68,6 +70,8 @@ class DefaultMenuCacheTest(unittest.TestCase):
 
         self.assertFalse(snapshot["values"]["poolTempF"]["fresh"])
         self.assertEqual(snapshot["values"]["poolTempF"]["stale_reason"], "stale")
+        self.assertEqual(snapshot["values"]["poolTempF"]["value"], 84)
+        self.assertEqual(snapshot["values"]["poolTempF"]["age_sec"], 90.0)
 
     def test_mode_uses_spillover_leds(self):
         cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: 100.0)
@@ -127,6 +131,52 @@ class DefaultMenuCacheTest(unittest.TestCase):
         self.assertEqual(snapshot["values"]["heaterRun"]["value"], True)
         self.assertEqual(snapshot["values"]["heaterRun"]["display"], "On")
         self.assertEqual(snapshot["values"]["heaterRun"]["raw"], "led:heater")
+
+
+class StalenessRemovalTest(unittest.TestCase):
+    """3-minute removal threshold tests for value/display/age_sec in webUI payload."""
+
+    def test_value_under_3min_is_present(self):
+        # age ~ 90s < 180s => value, display ("reading"), and age_sec are populated
+        now = 190.0
+        cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: now)
+        cache.observe_display(["Pool Temp 78°F"], observed_at=100.0)
+
+        v = cache.as_dict()["values"]["poolTempF"]
+        self.assertEqual(v["value"], 78)
+        self.assertEqual(v["display"], "78F")
+        self.assertAlmostEqual(v["age_sec"], 90.0, places=1)
+        self.assertIsNotNone(v["observed_at"])
+
+    def test_value_over_3min_has_value_display_age_removed(self):
+        # age ~ 300s > 180s => value/display/age cleared for poolTempF;
+        # a later sample remains unaffected
+        now = 400.0
+        cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: now)
+        cache.observe_display(["Pool Temp 78°F"], observed_at=100.0)
+        cache.observe_display(["Air Temp 71°F"], observed_at=350.0)
+
+        vals = cache.as_dict()["values"]
+        stale = vals["poolTempF"]
+        fresh = vals["ambientF"]
+
+        self.assertIsNone(stale["value"])
+        self.assertIsNone(stale["display"])
+        self.assertIsNone(stale["age_sec"])
+        self.assertIsNotNone(stale.get("observed_at"))
+        self.assertEqual(fresh["value"], 71)
+        self.assertEqual(fresh["display"], "71F")
+
+    def test_value_exactly_at_3min_is_kept(self):
+        # Threshold is strict ">"; exactly 180s still returns data.
+        now = 280.0
+        cache = DefaultMenuCache(stale_after_sec=45, clock=lambda: now)
+        cache.observe_display(["Pool Temp 78°F"], observed_at=100.0)
+
+        v = cache.as_dict()["values"]["poolTempF"]
+        self.assertEqual(v["value"], 78)
+        self.assertEqual(v["display"], "78F")
+        self.assertAlmostEqual(v["age_sec"], 180.0, places=1)
 
 
 if __name__ == "__main__":
