@@ -5,6 +5,7 @@ import logging
 from typing import Callable, List, Tuple, Optional
 from collections import deque
 from threading import Lock
+from .default_menu import DefaultMenuCache
 try:
     # Keys enum from swilson/aqualogic
     from aqualogic.keys import Keys
@@ -49,12 +50,21 @@ class DisplayState:
             self.updated_at = time.time()
 
 _state = DisplayState()
+_default_menu = DefaultMenuCache()
 
 def update_display(lines: Optional[List[str]], blink: Optional[List[Tuple[int, int]]], leds: Optional[dict]) -> None:
     _state.update(lines, blink, leds)
+    if lines is not None or leds is not None:
+        current = _state.as_dict()
+        observed_lines = current.get("lines") if lines is not None else []
+        observed_leds = current.get("leds") if leds is not None or lines is not None else None
+        _default_menu.observe_display(observed_lines, observed_leds, current.get("updated_at"))
 
 def get_display() -> dict:
     return _state.as_dict()
+
+def get_default_menu() -> dict:
+    return _default_menu.as_dict()
 
 # Convenience for when only text is known
 def ingest_display_lines(lines: List[str]) -> None:
@@ -103,6 +113,7 @@ def enqueue_key(name: str) -> bool:
         return False
     with _key_lock:
         _key_q.append(_KEY_MAP[k])
+    _default_menu.invalidate_for_key(k)
     logger.info(f"controls: queued key {k}")
     return True
 

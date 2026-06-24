@@ -40,6 +40,11 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
     def api_display():
         return jsonify(controls.get_display())
 
+    @app.get("/api/default-menu")
+    @require_auth
+    def api_default_menu():
+        return jsonify(controls.get_default_menu())
+
     @app.post("/api/key/<keyname>")
     @require_auth
     def api_keypress(keyname):
