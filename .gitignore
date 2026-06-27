@@ -172,3 +172,10 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 venv-pool/
+.vsp-control-enabled
+.vsp-rollback.json
+.automation-control-enabled
+.automation-state.json
+.clock-sync-state.json
+.vsp-rollback.json.tmp
+aqualogic_mqtt.err

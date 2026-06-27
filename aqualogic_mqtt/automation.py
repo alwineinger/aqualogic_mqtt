@@ -1,0 +1,592 @@
+"""Priority and time resolution for host-owned PL-PLUS automation.
+
+All persisted timestamps are UTC. Recurring pool schedules are interpreted in
+America/New_York so the intended wall-clock behavior survives DST changes.
+"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, time, timedelta, timezone
+import json
+import os
+from threading import Lock
+from typing import Callable, Mapping, Optional, Sequence
+from zoneinfo import ZoneInfo
+
+
+LOCAL_TIMEZONE = ZoneInfo("America/New_York")
+UTC = timezone.utc
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def parse_utc(value: str | datetime) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value or "").strip()
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("timestamp must include a UTC offset")
+    return parsed.astimezone(UTC)
+
+
+def format_utc(value: datetime) -> str:
+    return parse_utc(value).isoformat().replace("+00:00", "Z")
+
+
+@dataclass(frozen=True)
+class PumpWindow:
+    start: time
+    end: time
+    preset: str
+
+    def contains(self, local_time: time) -> bool:
+        current = (local_time.hour, local_time.minute, local_time.second)
+        start = (self.start.hour, self.start.minute, self.start.second)
+        end = (self.end.hour, self.end.minute, self.end.second)
+        if start < end:
+            return start <= current < end
+        return current >= start or current < end
+
+
+DEFAULT_PUMP_SCHEDULE = (
+    PumpWindow(time(0, 0), time(8, 0), "speed4"),
+    PumpWindow(time(8, 0), time(10, 0), "speed1"),
+    PumpWindow(time(10, 0), time(11, 0), "speed2"),
+    PumpWindow(time(11, 0), time(0, 0), "speed3"),
+)
+
+
+@dataclass(frozen=True)
+class ManualOverride:
+    expires_utc: datetime
+    mode: Optional[str] = None
+    pump_preset: Optional[str] = None
+    auto_heat: Optional[bool] = None
+    heater_relay: Optional[bool] = None
+    lights: Optional[bool] = None
+    blower: Optional[bool] = None
+    filter_on: Optional[bool] = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "expires_utc", parse_utc(self.expires_utc))
+        if self.mode is not None and self.mode not in ("pool", "spa", "spillover"):
+            raise ValueError("manual mode must be pool, spa, or spillover")
+        if self.pump_preset is not None and self.pump_preset not in {
+            "speed1", "speed2", "speed3", "speed4"
+        }:
+            raise ValueError("manual pump preset must be speed1, speed2, speed3, or speed4")
+        if self.filter_on is not None and not isinstance(self.filter_on, bool):
+            raise ValueError("manual filter_on must be a boolean or null")
+
+    def active_at(self, now_utc: datetime) -> bool:
+        return parse_utc(now_utc) < self.expires_utc
+
+
+@dataclass(frozen=True)
+class DesiredState:
+    source: str
+    mode: str
+    pump_preset: Optional[str]
+    filter_on: bool = True
+    suppress_filter_speed: bool = False
+    session_id: Optional[str] = None
+    switches: Mapping[str, Optional[bool]] = field(default_factory=dict)
+
+
+class ScheduleResolver:
+    """Resolve: calendar spa > manual override > cleanout > pump schedule."""
+
+    def __init__(
+        self,
+        *,
+        timezone_: ZoneInfo = LOCAL_TIMEZONE,
+        pump_schedule: Sequence[PumpWindow] = DEFAULT_PUMP_SCHEDULE,
+        cleanout_start: time = time(9, 0),
+        cleanout_end: time = time(10, 30),
+        fallback_preset: str = "speed4",
+    ):
+        self.timezone = timezone_
+        self.pump_schedule = tuple(pump_schedule)
+        self.cleanout_start = cleanout_start
+        self.cleanout_end = cleanout_end
+        self.fallback_preset = fallback_preset
+
+    def scheduled_preset(self, local_time: time) -> str:
+        for window in self.pump_schedule:
+            if window.contains(local_time):
+                return window.preset
+        return self.fallback_preset
+
+    def _cleanout_active(self, local_time: time) -> bool:
+        current = (local_time.hour, local_time.minute, local_time.second)
+        start = (self.cleanout_start.hour, self.cleanout_start.minute, self.cleanout_start.second)
+        end = (self.cleanout_end.hour, self.cleanout_end.minute, self.cleanout_end.second)
+        return start <= current < end
+
+    @staticmethod
+    def _switches(source: object) -> dict[str, Optional[bool]]:
+        return {
+            name: getattr(source, name)
+            for name in ("auto_heat", "heater_relay", "lights", "blower")
+            if getattr(source, name) is not None
+        }
+
+    def resolve(
+        self,
+        now_utc: datetime,
+        *,
+        manual_override: Optional[ManualOverride] = None,
+        openclaw_spa_session: Optional[Mapping[str, object]] = None,
+        pool_heat_enabled: bool = False,
+    ) -> DesiredState:
+        now = parse_utc(now_utc)
+        local = now.astimezone(self.timezone)
+        scheduled = self.scheduled_preset(local.timetz().replace(tzinfo=None))
+
+        if openclaw_spa_session is not None:
+            return DesiredState(
+                source="calendar",
+                mode="spa",
+                pump_preset=None,
+                filter_on=True,
+                suppress_filter_speed=True,
+                session_id=str(openclaw_spa_session.get("session_id") or "openclaw"),
+                switches={"auto_heat": True, "heater_relay": True},
+            )
+
+        cleanout = self._cleanout_active(local.timetz().replace(tzinfo=None))
+        base_mode = "spillover" if cleanout else "pool"
+        base_source = "cleanout" if cleanout else "schedule"
+        if manual_override is not None and manual_override.active_at(now):
+            mode = manual_override.mode or base_mode
+            pump = manual_override.pump_preset or scheduled
+            filter_on = True if manual_override.filter_on is None else manual_override.filter_on
+            suppress = mode == "spa" or not filter_on
+            switches = self._switches(manual_override)
+            # Pool heat is a durable user preference rather than a timed
+            # manual override. Calendar Spa sessions still take precedence.
+            switches["auto_heat"] = pool_heat_enabled
+            return DesiredState(
+                source="manual",
+                mode=mode,
+                pump_preset=None if suppress else pump,
+                filter_on=filter_on,
+                suppress_filter_speed=suppress,
+                switches=switches,
+            )
+
+        return DesiredState(
+            source=base_source,
+            mode=base_mode,
+            pump_preset=scheduled,
+            filter_on=True,
+            switches={"auto_heat": pool_heat_enabled},
+        )
+
+
+def desired_state_dict(state: DesiredState) -> dict:
+    return asdict(state)
+
+
+class AutomationEngine:
+    """Persist desired inputs and reconcile one safe hardware action per tick."""
+
+    def __init__(
+        self,
+        equipment: object,
+        vsp: object,
+        *,
+        enabled: bool = False,
+        enable_file: Optional[str] = None,
+        state_file: Optional[str] = ".automation-state.json",
+        resolver: Optional[ScheduleResolver] = None,
+        now: Callable[[], datetime] = utc_now,
+        speed_lease_seconds: float = 90.0,
+        manual_duration_seconds: float = 12 * 60 * 60,
+        clock_sync: Optional[object] = None,
+    ):
+        self._equipment = equipment
+        self._vsp = vsp
+        self._enabled = bool(enabled)
+        self._enable_file = str(enable_file) if enable_file else None
+        self._state_file = str(state_file) if state_file else None
+        self._resolver = resolver or ScheduleResolver()
+        self._now = now
+        self._speed_lease_seconds = float(speed_lease_seconds)
+        self._manual_duration_seconds = float(manual_duration_seconds)
+        self._clock_sync = clock_sync
+        self._lock = Lock()
+        self._tick_lock = Lock()
+        self._manual_override: Optional[ManualOverride] = None
+        self._openclaw_spa_session: Optional[dict] = None
+        self._pool_heat_enabled = False
+        self._phase = "disabled"
+        self._last_error: Optional[str] = None
+        self._last_tick_utc: Optional[datetime] = None
+        self._desired: Optional[DesiredState] = None
+        self._load()
+
+    def is_enabled(self) -> bool:
+        return self._enabled or bool(self._enable_file and os.path.isfile(self._enable_file))
+
+    def hardware_busy(self) -> bool:
+        return bool(self._clock_sync is not None and self._clock_sync.is_busy())
+
+    @staticmethod
+    def _manual_dict(manual: ManualOverride) -> dict:
+        return {
+            "expires_utc": format_utc(manual.expires_utc),
+            **{
+                name: getattr(manual, name)
+                for name in ("mode", "pump_preset", "auto_heat", "heater_relay", "lights", "blower", "filter_on")
+                if getattr(manual, name) is not None
+            },
+        }
+
+    @staticmethod
+    def _manual_from_dict(value: Mapping[str, object]) -> ManualOverride:
+        kwargs = {
+            name: value.get(name)
+            for name in ("mode", "pump_preset", "auto_heat", "heater_relay", "lights", "blower", "filter_on")
+        }
+        for name in ("auto_heat", "heater_relay", "lights", "blower", "filter_on"):
+            if kwargs[name] is not None and not isinstance(kwargs[name], bool):
+                raise ValueError(f"manual {name} must be a boolean or null")
+        return ManualOverride(expires_utc=parse_utc(value.get("expires_utc")), **kwargs)
+
+    def _load(self) -> None:
+        if not self._state_file or not os.path.isfile(self._state_file):
+            return
+        try:
+            with open(self._state_file, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            manual_data = dict(payload.get("manual_override") or {})
+            saved_pool_heat = payload.get("pool_heat_enabled")
+            if saved_pool_heat is None:
+                # Migrate a legacy timed Auto Heat override to the durable
+                # pool-heating preference on first load.
+                saved_pool_heat = manual_data.get("auto_heat", False)
+            if not isinstance(saved_pool_heat, bool):
+                raise ValueError("pool_heat_enabled must be a boolean")
+            manual_data.pop("auto_heat", None)
+            manual_fields = ("mode", "pump_preset", "heater_relay", "lights", "blower", "filter_on")
+            manual = (
+                self._manual_from_dict(manual_data)
+                if manual_data and any(manual_data.get(name) is not None for name in manual_fields)
+                else None
+            )
+            openclaw_spa = payload.get("openclaw_spa_session")
+            if openclaw_spa:
+                openclaw_spa = {
+                    "session_id": str(openclaw_spa.get("session_id") or "openclaw"),
+                    "started_utc": format_utc(parse_utc(openclaw_spa.get("started_utc"))),
+                }
+            with self._lock:
+                self._manual_override = manual
+                self._openclaw_spa_session = openclaw_spa
+                self._pool_heat_enabled = saved_pool_heat
+        except Exception as exc:
+            self._last_error = f"automation state load failed: {exc}"
+
+    def _save_locked(self) -> None:
+        if not self._state_file:
+            return
+        payload = {
+            "version": 2,
+            "updated_at_utc": format_utc(self._now()),
+            "pool_heat_enabled": self._pool_heat_enabled,
+            "manual_override": (
+                self._manual_dict(self._manual_override) if self._manual_override is not None else None
+            ),
+            "openclaw_spa_session": self._openclaw_spa_session,
+        }
+        parent = os.path.dirname(os.path.abspath(self._state_file))
+        os.makedirs(parent, exist_ok=True)
+        temp_path = f"{self._state_file}.tmp"
+        with open(temp_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, self._state_file)
+
+    def activate_openclaw_spa(
+        self,
+        *,
+        session_id: Optional[str] = None,
+    ) -> dict:
+        if not self.is_enabled():
+            raise RuntimeError("host automation is disabled; refusing to queue an OpenClaw spa session")
+        now = parse_utc(self._now())
+        requested_id = str(session_id or format_utc(now))
+        identifier = requested_id if requested_id.startswith("openclaw") else f"openclaw-{requested_id}"
+        with self._lock:
+            self._openclaw_spa_session = {
+                "session_id": identifier,
+                "started_utc": format_utc(now),
+            }
+            self._save_locked()
+        return self.status()
+
+    def stop_openclaw_spa(self, session_id: Optional[str] = None) -> dict:
+        identifier = str(session_id) if session_id else None
+        if identifier is not None and not identifier.startswith("openclaw"):
+            identifier = f"openclaw-{identifier}"
+        with self._lock:
+            if identifier is None or (
+                self._openclaw_spa_session is not None
+                and self._openclaw_spa_session.get("session_id") == identifier
+            ):
+                self._openclaw_spa_session = None
+            self._save_locked()
+        return self.status()
+
+    def set_manual(self, **updates: object) -> dict:
+        marker = object()
+        pool_heat = updates.pop("auto_heat", marker)
+        pool_heat_supplied = pool_heat is not marker
+        if pool_heat_supplied and not isinstance(pool_heat, bool):
+            raise ValueError("auto_heat must be a boolean")
+        allowed = {"mode", "pump_preset", "heater_relay", "lights", "blower", "filter_on"}
+        unknown = set(updates) - allowed
+        if unknown:
+            raise ValueError(f"unsupported manual fields: {', '.join(sorted(unknown))}")
+        now = parse_utc(self._now())
+        with self._lock:
+            if pool_heat_supplied:
+                self._pool_heat_enabled = pool_heat
+            current = self._manual_override
+            if updates:
+                fields = {}
+                if current is not None and current.active_at(now):
+                    fields = {
+                        name: getattr(current, name)
+                        for name in allowed
+                        if getattr(current, name) is not None
+                    }
+                fields.update(updates)
+                self._manual_override = ManualOverride(
+                    expires_utc=now + timedelta(seconds=self._manual_duration_seconds),
+                    **fields,
+                )
+            self._save_locked()
+        return self.status()
+
+    def set_pool_heat(self, enabled: bool) -> dict:
+        if not isinstance(enabled, bool):
+            raise ValueError("pool heat target must be a boolean")
+        with self._lock:
+            self._pool_heat_enabled = enabled
+            self._save_locked()
+        return self.status()
+
+    def clear_manual(self, field: Optional[str] = None) -> dict:
+        allowed = {"mode", "pump_preset", "auto_heat", "heater_relay", "lights", "blower", "filter_on"}
+        if field is not None and field not in allowed:
+            raise ValueError(f"unsupported manual field: {field}")
+        with self._lock:
+            if field == "auto_heat":
+                self._pool_heat_enabled = False
+            current = self._manual_override
+            if field is None or current is None:
+                self._manual_override = None
+            else:
+                fields = {
+                    name: getattr(current, name)
+                    for name in allowed
+                    if name != field and getattr(current, name) is not None
+                }
+                self._manual_override = (
+                    ManualOverride(expires_utc=current.expires_utc, **fields) if fields else None
+                )
+            self._save_locked()
+        return self.status()
+
+    def _inputs(self) -> tuple[Optional[ManualOverride], Optional[dict], bool]:
+        with self._lock:
+            return (
+                self._manual_override,
+                dict(self._openclaw_spa_session) if self._openclaw_spa_session else None,
+                self._pool_heat_enabled,
+            )
+
+    def status(self) -> dict:
+        now = parse_utc(self._now())
+        manual, openclaw_spa, pool_heat_enabled = self._inputs()
+        desired = self._resolver.resolve(
+            now,
+            manual_override=manual,
+            openclaw_spa_session=openclaw_spa,
+            pool_heat_enabled=pool_heat_enabled,
+        )
+        with self._lock:
+            phase = self._phase
+            last_error = self._last_error
+            last_tick = self._last_tick_utc
+        result = {
+            "available": True,
+            "enabled": self.is_enabled(),
+            "enable_file": self._enable_file,
+            "state_file": self._state_file,
+            "timezone": str(self._resolver.timezone),
+            "priority": ["calendar", "manual", "cleanout", "schedule"],
+            "phase": phase,
+            "last_error": last_error,
+            "last_tick_utc": format_utc(last_tick) if last_tick is not None else None,
+            "now_utc": format_utc(now),
+            "now_local": now.astimezone(self._resolver.timezone).isoformat(),
+            "desired": desired_state_dict(desired),
+            "manual_override": self._manual_dict(manual) if manual is not None else None,
+            "openclaw_spa_session": openclaw_spa,
+            "pool_heat_enabled": pool_heat_enabled,
+        }
+        if self._clock_sync is not None:
+            result["clock_sync"] = self._clock_sync.status()
+        return result
+
+    def tick(self) -> bool:
+        if not self._tick_lock.acquire(blocking=False):
+            return False
+        try:
+            now = parse_utc(self._now())
+            manual, openclaw_spa, pool_heat_enabled = self._inputs()
+            desired = self._resolver.resolve(
+                now,
+                manual_override=manual,
+                openclaw_spa_session=openclaw_spa,
+                pool_heat_enabled=pool_heat_enabled,
+            )
+            with self._lock:
+                self._last_tick_utc = now
+                self._desired = desired
+
+            if not self.is_enabled():
+                with self._lock:
+                    self._phase = "disabled"
+                return False
+
+            equipment = self._equipment.status()
+            vsp = self._vsp.status()
+            if equipment.get("service_mode") or vsp.get("service_mode"):
+                with self._lock:
+                    self._phase = "service_inhibit"
+                    self._last_error = None
+                return False
+
+            if self._clock_sync is not None and self._clock_sync.is_busy():
+                with self._lock:
+                    self._phase = "clock_sync"
+                return False
+
+            # Maintenance is lower priority than calendar/manual/cleanout. A
+            # due weekly check briefly releases the schedule speed lease so it
+            # has exclusive use of the display menu.
+            if (
+                self._clock_sync is not None
+                and desired.source == "schedule"
+                and self._clock_sync.due(now)
+            ):
+                if vsp.get("busy"):
+                    self._vsp.clear_target()
+                    with self._lock:
+                        self._phase = "releasing_speed_for_clock"
+                    return True
+                if equipment.get("busy"):
+                    with self._lock:
+                        self._phase = "waiting_for_clock"
+                    return False
+                started = self._clock_sync.check_or_start()
+                if started:
+                    with self._lock:
+                        self._phase = "clock_sync"
+                    return True
+
+            # Mode changes can select a different hardware pump preset. Always
+            # restore a leased Filter Speed edit before cycling Pool/Spa.
+            if desired.suppress_filter_speed or equipment.get("mode") != desired.mode:
+                if vsp.get("busy"):
+                    self._vsp.clear_target()
+                    with self._lock:
+                        self._phase = "releasing_speed_for_mode"
+                    return True
+                if equipment.get("busy"):
+                    with self._lock:
+                        self._phase = "waiting_for_mode"
+                    return False
+                if equipment.get("mode") != desired.mode:
+                    self._equipment.request_mode(desired.mode)
+                    with self._lock:
+                        self._phase = "setting_mode"
+                    return True
+
+            if equipment.get("busy"):
+                with self._lock:
+                    self._phase = "waiting_for_mode"
+                return False
+
+            for name, target in desired.switches.items():
+                if equipment.get(name) != target:
+                    self._equipment.set_switch(name, target)
+                    with self._lock:
+                        self._phase = f"setting_{name}"
+                    return True
+
+            if equipment.get("filter_on") != desired.filter_on:
+                self._equipment.set_switch("filter", desired.filter_on)
+                with self._lock:
+                    self._phase = "setting_filter"
+                return True
+
+            if desired.suppress_filter_speed or desired.pump_preset is None:
+                with self._lock:
+                    self._phase = "converged"
+                    self._last_error = None
+                return False
+
+            target = desired.pump_preset
+            current_target = vsp.get("target_name")
+            if vsp.get("busy") and current_target != target:
+                self._vsp.clear_target()
+                with self._lock:
+                    self._phase = "changing_speed"
+                return True
+            if vsp.get("busy") and current_target == target:
+                if vsp.get("phase") == "holding" and (vsp.get("lease_remaining_sec") or 0) < 45:
+                    self._vsp.request_preset(
+                        target,
+                        source=desired.source,
+                        lease_seconds=self._speed_lease_seconds,
+                    )
+                    with self._lock:
+                        self._phase = "holding_speed"
+                    return True
+                with self._lock:
+                    self._phase = "holding_speed"
+                return False
+            if vsp.get("rollback_pending"):
+                with self._lock:
+                    self._phase = "waiting_for_speed_recovery"
+                return False
+
+            self._vsp.request_preset(
+                target,
+                source=desired.source,
+                lease_seconds=self._speed_lease_seconds,
+            )
+            with self._lock:
+                self._phase = "setting_speed"
+            return True
+        except Exception as exc:
+            with self._lock:
+                self._phase = "error"
+                self._last_error = str(exc)
+            return False
+        finally:
+            self._tick_lock.release()

@@ -6,6 +6,9 @@ from typing import Callable, List, Tuple, Optional
 from collections import deque
 from threading import Lock
 from .default_menu import DefaultMenuCache
+from .vsp import VspDriver
+from .equipment import EquipmentController
+from .automation import AutomationEngine
 try:
     # Keys enum from swilson/aqualogic
     from aqualogic.keys import Keys
@@ -51,6 +54,9 @@ class DisplayState:
 
 _state = DisplayState()
 _default_menu = DefaultMenuCache()
+_vsp_driver: Optional[VspDriver] = None
+_equipment: Optional[EquipmentController] = None
+_automation: Optional[AutomationEngine] = None
 
 def update_display(lines: Optional[List[str]], blink: Optional[List[Tuple[int, int]]], leds: Optional[dict]) -> None:
     _state.update(lines, blink, leds)
@@ -65,6 +71,139 @@ def get_display() -> dict:
 
 def get_default_menu() -> dict:
     return _default_menu.as_dict()
+
+def set_vsp_driver(driver: VspDriver) -> None:
+    global _vsp_driver
+    _vsp_driver = driver
+
+def set_equipment_controller(controller: EquipmentController) -> None:
+    global _equipment
+    _equipment = controller
+
+def set_automation_engine(engine: AutomationEngine) -> None:
+    global _automation
+    _automation = engine
+
+def get_automation_status() -> dict:
+    if _automation is None:
+        return {"available": False, "enabled": False, "last_error": "automation engine is not registered"}
+    return _automation.status()
+
+def set_manual_override(values: dict) -> dict:
+    if _automation is None:
+        raise RuntimeError("automation engine is not registered")
+    return _automation.set_manual(**values)
+
+def set_pool_heat(enabled: bool) -> dict:
+    if _automation is None:
+        raise RuntimeError("automation engine is not registered")
+    return _automation.set_pool_heat(enabled)
+
+def clear_manual_override(field: Optional[str] = None) -> dict:
+    if _automation is None:
+        raise RuntimeError("automation engine is not registered")
+    return _automation.clear_manual(field)
+
+def activate_openclaw_spa(values: dict) -> dict:
+    if _automation is None:
+        raise RuntimeError("automation engine is not registered")
+    return _automation.activate_openclaw_spa(
+        session_id=values.get("session_id"),
+    )
+
+def stop_openclaw_spa(session_id: Optional[str] = None) -> dict:
+    if _automation is None:
+        raise RuntimeError("automation engine is not registered")
+    return _automation.stop_openclaw_spa(session_id)
+
+def get_equipment_status() -> dict:
+    if _equipment is None:
+        return {"available": False, "last_error": "equipment controller is not registered"}
+    return {
+        "available": True,
+        **_equipment.status(),
+        "vsp": get_vsp_status(),
+        "automation": get_automation_status(),
+    }
+
+def set_equipment_switch(control: str, enabled: bool) -> dict:
+    if _equipment is None:
+        raise RuntimeError("equipment controller is not registered")
+    if _automation is not None and _automation.is_enabled():
+        if control == "auto_heat":
+            return _automation.set_pool_heat(enabled)
+        field = "filter_on" if control == "filter" else control
+        return _automation.set_manual(**{field: enabled})
+    if _vsp_driver is not None and _vsp_driver.is_busy():
+        raise RuntimeError("equipment control is blocked while a VSP menu operation is active")
+    return _equipment.set_switch(control, enabled)
+
+def request_equipment_mode(mode: str) -> dict:
+    if _equipment is None:
+        raise RuntimeError("equipment controller is not registered")
+    if _automation is not None and _automation.is_enabled():
+        return _automation.set_manual(mode=mode)
+    if _vsp_driver is not None and _vsp_driver.is_busy():
+        raise RuntimeError("mode control is blocked while a VSP menu operation is active")
+    return _equipment.request_mode(mode)
+
+def get_vsp_status() -> dict:
+    if _vsp_driver is None:
+        return {"enabled": False, "available": False, "last_error": "VSP driver is not registered"}
+    return {"available": True, **_vsp_driver.status()}
+
+def request_vsp_preset(preset: str, lease_seconds: Optional[float] = None) -> dict:
+    if _vsp_driver is None:
+        raise RuntimeError("VSP driver is not registered")
+    if _automation is not None and _automation.is_enabled():
+        return _automation.set_manual(pump_preset=preset)
+    return _vsp_driver.request_preset(preset, source="manual", lease_seconds=lease_seconds)
+
+def clear_vsp_target() -> dict:
+    if _vsp_driver is None:
+        raise RuntimeError("VSP driver is not registered")
+    if _automation is not None and _automation.is_enabled():
+        return _automation.clear_manual("pump_preset")
+    return _vsp_driver.clear_target()
+
+def mqtt_automation_command(topic: str, payload: str) -> Optional[tuple[str, object]]:
+    value = str(payload or "").strip().upper()
+    if value not in ("ON", "OFF"):
+        return None
+    enabled = value == "ON"
+    mappings = {
+        "aqualogic_switch_filter/set": ("switch", ("filter", enabled)),
+        "aqualogic_light_lights/set": ("switch", ("lights", enabled)),
+        "aqualogic_switch_aux_1/set": ("switch", ("blower", enabled)),
+        "aqualogic_switch_aux_2/set": ("switch", ("heater_relay", enabled)),
+        "aqualogic_switch_heater_auto/set": ("switch", ("auto_heat", enabled)),
+    }
+    for suffix, command in mappings.items():
+        if str(topic).endswith(suffix):
+            return command
+    if enabled and str(topic).endswith("aqualogic_switch_pool/set"):
+        return ("mode", "pool")
+    if str(topic).endswith("aqualogic_switch_spa/set"):
+        return ("mode", "spa" if enabled else "pool")
+    return None
+
+def handle_automation_mqtt(topic: str, payload: str) -> bool:
+    if _automation is None or not _automation.is_enabled():
+        return False
+    command = mqtt_automation_command(topic, payload)
+    if command is None:
+        return False
+    kind, value = command
+    if kind == "mode":
+        _automation.set_manual(mode=value)
+    else:
+        control, enabled = value
+        if control == "auto_heat":
+            _automation.set_pool_heat(enabled)
+            return True
+        field = "filter_on" if control == "filter" else control
+        _automation.set_manual(**{field: enabled})
+    return True
 
 # Convenience for when only text is known
 def ingest_display_lines(lines: List[str]) -> None:
@@ -108,6 +247,12 @@ def set_key_sender(sender: Callable[[object], None]) -> None:
 def enqueue_key(name: str) -> bool:
     """Queue a keypress by name (menu/left/right/minus/plus/filter/pool_spa)."""
     k = (name or "").strip().lower()
+    if _vsp_driver is not None and _vsp_driver.is_busy():
+        logger.info("controls: key '%s' blocked while VSP menu operation is active", k)
+        return False
+    if _automation is not None and _automation.hardware_busy():
+        logger.info("controls: key '%s' blocked while clock synchronization is active", k)
+        return False
     if k not in _KEY_MAP:
         logger.debug(f"controls: unknown key '{name}'")
         return False

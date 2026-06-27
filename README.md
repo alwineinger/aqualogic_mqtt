@@ -191,3 +191,130 @@ mosquitto_sub -h 10.40.1.61 -p 1883 -v -t 'homeassistant/#' -t 'aqualogic/#'
 3. Buttons (`Menu, Left, Right, Plus, Minus, Filter`) send keys — confirmed in logs.
 4. MQTT broker publishes state to `homeassistant/device/aqualogic/state`.
 5. Service restarts cleanly via systemd.
+
+---
+
+## No-Power-Cycle VSP Driver
+
+The bridge includes a commissioned VSP driver that edits the currently active
+Filter Speed preset through the PL-PLUS Settings menu. PL-PLUS then owns and
+continuously broadcasts the resulting speed. The driver does **not** press
+Filter and does not turn the pump on or off. At lease expiry it restores the
+original preset percentage automatically.
+
+The driver is disabled by default until it has passed live commissioning:
+
+```bash
+export AQUALOGIC_VSP_CONTROL=1
+```
+
+For temporary commissioning without changing the service definition, create
+the local interlock file and delete it at any time to clear the active target:
+
+```bash
+touch /home/andy/aqualogic_mqtt/.vsp-control-enabled
+rm -f /home/andy/aqualogic_mqtt/.vsp-control-enabled
+```
+
+With the service restarted, inspect status and request a short leased preset:
+
+```bash
+curl http://10.40.1.61:8089/api/vsp
+curl -X POST http://10.40.1.61:8089/api/vsp/speed \
+  -H 'Content-Type: application/json' \
+  -d '{"preset":"speed1","lease_seconds":60}'
+curl -X DELETE http://10.40.1.61:8089/api/vsp/speed
+```
+
+Safety behavior:
+
+- Requests are rejected while the Filter LED is off or Service mode is on.
+- If the filter was off for more than 30 seconds, requests pause for the
+  controller's three-minute priming window after it comes back on.
+- Commissioning leases default to 60 seconds and are capped at 15 minutes.
+- The driver never falls back to the older Filter off/on speed-change helper.
+
+Before enabling any scheduler, live commissioning must verify each transition
+between 40%, 55%, 70%, and 95%, confirm that the Filter LED never turns off,
+confirm that no start-delay/prime screen appears, and confirm the observed
+pump speed remains stable for ten minutes.
+
+## Host-Owned PL-PLUS Automation
+
+The host scheduler and clock synchronization are disabled by default. They use
+separate local interlock files so deployment and activation are distinct:
+
+```bash
+touch /home/andy/aqualogic_mqtt/.vsp-control-enabled
+touch /home/andy/aqualogic_mqtt/.automation-control-enabled
+```
+
+Remove the automation interlock to stop new scheduled commands. Remove the VSP
+interlock to cancel and restore an active temporary preset edit.
+
+The recurring schedule is interpreted in `America/New_York`:
+
+- Speed 4: 00:00–08:00 (40%)
+- Speed 1: 08:00–10:00 (70%)
+- Speed 2: 10:00–11:00 (95%)
+- Speed 3: 11:00–00:00 (55%)
+- Cleanout: 09:00–10:30 in Spillover mode
+- Any uncovered pump interval falls back to Speed 4 while Service mode is off.
+
+Resolution order is calendar spa session, manual override, cleanout, then the
+normal pump schedule. Hardware Service mode inhibits every automation write.
+Calendar spa mode suppresses Filter Speed edits because PL-PLUS owns the
+separate Spa Speed preset.
+
+Filter on/off is part of the resolved desired state. Normal schedule,
+cleanout, and calendar Spa sessions require Filter on. A manual Filter-off
+override suppresses speed edits until it expires or is cleared. After every
+Pool/Spa valve key, the host waits 35 seconds for valve motion to settle before
+issuing another mode or Filter command.
+
+Manual web/API changes become 12-hour persisted overrides whenever automation
+is enabled, except Pool Heat. Pool Heat is a durable preference that remains
+enabled until explicitly turned off and is restored after a Spa session.
+Inspect the complete resolved state, local/UTC conversion, clock sync status,
+and active priority source at `/api/automation`.
+
+Existing Home Assistant/Hubitat discovery IDs and command topics are unchanged.
+While host automation is enabled, Filter, Lights, Aux1/Blower, Aux2/Heater
+Relay, Auto Heat, Pool, and Spa commands on those topics remain supported.
+Auto Heat updates the durable Pool Heat preference; the others become persisted
+manual overrides, preserving HomeKit control without bypassing priority or
+Service-mode interlocks. With automation disabled, the legacy direct MQTT path
+is unchanged.
+
+Once weekly, normal-schedule operation compares the cached PL-PLUS clock with
+the system clock. A difference of one minute or more triggers a guarded
+Settings-menu update. The check and successful sync timestamps are persisted
+in UTC in `.clock-sync-state.json`.
+
+The PL-PLUS `Spa CountDn` setting is a Configuration-menu hardware safeguard,
+not the Aux1 blower countdown. Set/audit it separately at 12:00; the host's
+manual override lifetime is also 12 hours.
+
+### OpenClaw spa-session control
+
+OpenClaw remains responsible for calendar schedules, preheat calculations,
+weather checks, and approvals. `aqualogic_mqtt` does not poll any calendar.
+After approval, OpenClaw activates a top-priority spa session:
+
+```bash
+curl -X POST http://127.0.0.1:8089/api/openclaw/spa \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"openclaw-example"}'
+```
+
+Activation requests Spa mode, Filter on, Aux2 heater relay on, and Auto Heat
+on. The software session has no timer; OpenClaw must stop it explicitly. The
+PL-PLUS Spa CountDn remains the independent hardware failsafe.
+
+```bash
+curl -X DELETE http://127.0.0.1:8089/api/openclaw/spa \
+  -H 'Content-Type: application/json' -d '{}'
+```
+
+Stopping returns to the lower-priority manual/cleanout/schedule state and
+restores the saved Pool Heat preference.

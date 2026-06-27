@@ -19,6 +19,10 @@ from .messages import Messages
 from .panelmanager import PanelManager
 from . import controls  # Web/UI controls: key queue + display state
 from .webapp import create_app  # Embedded Flask app for Web UI
+from .vsp import PanelPumpState, VspDriver
+from .equipment import EquipmentController
+from .automation import AutomationEngine
+from .clock_sync import ClockSyncDriver
 
 logger = logging.getLogger("aqualogic_mqtt.client")
 
@@ -39,13 +43,44 @@ class Client:
     _disconnect_retry_wait = 1
     _disconnect_retry_num = 0
 
-    def __init__(self, formatter:Messages, panel_manager:PanelManager, client_id=None, transport='tcp', protocol_num=5):
+    def __init__(self, formatter:Messages, panel_manager:PanelManager, client_id=None, transport='tcp', protocol_num=5,
+                 vsp_enabled=False, vsp_enable_file=None, vsp_rollback_file=None, vsp_default_lease_seconds=60.0,
+                 automation_enabled=False, automation_enable_file=None, automation_state_file=None,
+                 clock_sync_state_file=None):
         self._formatter = formatter
         self._pman = panel_manager
         self._panel = AquaLogic(web_port=0)
         # Register low-level key sender so the web/UI can queue button presses
         controls.set_key_sender(self._panel.send_key)
         controls.register_with_panel(self._panel)  # live LCD feed if available
+        self._vsp_driver = VspDriver(
+            self._panel,
+            enabled=vsp_enabled,
+            enable_file=vsp_enable_file,
+            rollback_file=vsp_rollback_file,
+            default_lease_seconds=vsp_default_lease_seconds,
+            key_sender=self._panel.send_key,
+            display_reader=controls.get_display,
+            menu_cache_reader=controls.get_default_menu,
+        )
+        controls.set_vsp_driver(self._vsp_driver)
+        self._equipment = EquipmentController(self._panel)
+        controls.set_equipment_controller(self._equipment)
+        self._clock_sync = ClockSyncDriver(
+            key_sender=self._panel.send_key,
+            display_reader=controls.get_display,
+            menu_cache_reader=controls.get_default_menu,
+            state_file=clock_sync_state_file,
+        )
+        self._automation = AutomationEngine(
+            self._equipment,
+            self._vsp_driver,
+            enabled=automation_enabled,
+            enable_file=automation_enable_file,
+            state_file=automation_state_file,
+            clock_sync=self._clock_sync,
+        )
+        controls.set_automation_engine(self._automation)
 
         protocol = mqtt.MQTTv311 if protocol_num == 3 else mqtt.MQTTv5
         self._paho_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
@@ -66,6 +101,8 @@ class Client:
             logger.debug(f"controls.drain_keypresses() skipped: {_e}")
 
         logger.debug(f"_panel_changed called... Publishing to {self._formatter.get_state_topic()}...")
+
+        self._observe_vsp_state(panel)
 
         # Helpful debug to see what LCD attributes exist on this panel object
         try:
@@ -161,9 +198,25 @@ class Client:
 
         self._paho_client.publish(self._formatter.get_state_topic(), msg)
 
+    def _observe_vsp_state(self, panel):
+        try:
+            self._vsp_driver.observe(PanelPumpState(
+                requested_speed_pct=getattr(panel, 'pump_speed', None),
+                pump_power_w=getattr(panel, 'pump_power', None),
+                filter_on=bool(panel.get_state(States.FILTER)),
+                service_mode=bool(panel.get_state(States.SERVICE)),
+            ))
+        except Exception as exc:
+            logger.debug(f"VSP state observation failed: {exc}")
+
     # Respond to MQTT events
     def _on_message(self, client, userdata, msg):
         logger.debug(f"_on_message called for topic {msg.topic} with payload {msg.payload}")
+
+        payload = msg.payload.decode().strip()
+        if controls.handle_automation_mqtt(msg.topic, payload):
+            logger.info("MQTT command captured as host automation manual override: %s", msg.topic)
+            return
 
         # ALW Handle button press for POOL_SPA toggle
         if msg.topic.endswith("button_pool_spa_toggle/set") and msg.payload.decode().strip().lower() in ["press", "on", "1", "true"]:
@@ -179,7 +232,7 @@ class Client:
             self._panel.send_key(Keys.PLUS)
             return
         #
-        new_messages = self._formatter.handle_message_on_topic(msg.topic, str(msg.payload.decode("utf-8")), self._panel)
+        new_messages = self._formatter.handle_message_on_topic(msg.topic, payload, self._panel)
         for t, m in new_messages:
             self._paho_client.publish(t, m)
 
@@ -257,6 +310,9 @@ class Client:
             self._panel_thread.start()
             #self._paho_client.loop_forever()
             while True:
+                self._observe_vsp_state(self._panel)
+                self._vsp_driver.tick()
+                self._automation.tick()
                 logger.debug(f"Update age: {self._pman.get_last_update_age()}")
                 if not self._pman.is_updating():
                     logger.critical("Panel not updated in "+str(self._pman.get_last_update_age())+"s, exiting!")
@@ -297,7 +353,7 @@ if __name__ == "__main__":
         help="serial device source (path)")
     source_group_mex.add_argument('-t', '--tcp', type=str, metavar="tcpserialhost:port",
         help="network serial adapter source in the format host:port")
-    source_group.add_argument('-T', '--source-timeout', nargs=1, type=int, default=10, metavar="SECONDS",
+    source_group.add_argument('-T', '--source-timeout', nargs=1, type=int, default=30, metavar="SECONDS",
         help="seconds after which the source connection is deemed to be lost if no updates have been seen--the program will exit if the timeout is reached")
     
     mqtt_group = parser.add_argument_group('MQTT destination options')
@@ -324,6 +380,22 @@ if __name__ == "__main__":
     web_group.add_argument('--http-basic-user', default=os.getenv('AQUALOGIC_HTTP_USER'), type=str, help='Basic auth user for Web UI (optional)')
     web_group.add_argument('--http-basic-pass', default=os.getenv('AQUALOGIC_HTTP_PASS'), type=str, help='Basic auth password for Web UI (optional)')
     web_group.add_argument('--http-static-dir', default=os.getenv('AQUALOGIC_STATIC_DIR'), type=str, help='Path to static dir (defaults to package static)')
+    web_group.add_argument('--vsp-control', action='store_true', default=os.getenv('AQUALOGIC_VSP_CONTROL', '0') == '1',
+        help='enable the no-power-cycle VSP control API (default: disabled)')
+    web_group.add_argument('--vsp-enable-file', default=os.getenv('AQUALOGIC_VSP_ENABLE_FILE', '.vsp-control-enabled'), type=str,
+        help='local commissioning interlock file; its presence enables VSP requests (default: .vsp-control-enabled)')
+    web_group.add_argument('--vsp-rollback-file', default=os.getenv('AQUALOGIC_VSP_ROLLBACK_FILE', '.vsp-rollback.json'), type=str,
+        help='persistent rollback journal for interrupted VSP leases (default: .vsp-rollback.json)')
+    web_group.add_argument('--vsp-default-lease-seconds', default=float(os.getenv('AQUALOGIC_VSP_DEFAULT_LEASE_SECONDS', '60')), type=float,
+        help='default lifetime for a commissioning VSP target (default: 60; maximum: 900)')
+    web_group.add_argument('--automation', action='store_true', default=os.getenv('AQUALOGIC_AUTOMATION', '0') == '1',
+        help='enable host-owned PL-PLUS schedule reconciliation (default: disabled)')
+    web_group.add_argument('--automation-enable-file', default=os.getenv('AQUALOGIC_AUTOMATION_ENABLE_FILE', '.automation-control-enabled'), type=str,
+        help='local interlock file whose presence enables automation (default: .automation-control-enabled)')
+    web_group.add_argument('--automation-state-file', default=os.getenv('AQUALOGIC_AUTOMATION_STATE_FILE', '.automation-state.json'), type=str,
+        help='persistent calendar/manual automation state (default: .automation-state.json)')
+    web_group.add_argument('--clock-sync-state-file', default=os.getenv('AQUALOGIC_CLOCK_SYNC_STATE_FILE', '.clock-sync-state.json'), type=str,
+        help='persistent weekly PL-PLUS clock-sync state (default: .clock-sync-state.json)')
 
     args = parser.parse_args()
 
@@ -351,7 +423,15 @@ if __name__ == "__main__":
     
     mqtt_client = Client(formatter=formatter, panel_manager=pman,
                          client_id=args.mqtt_clientid, transport=args.mqtt_transport, 
-                         protocol_num=args.mqtt_version
+                         protocol_num=args.mqtt_version,
+                         vsp_enabled=args.vsp_control,
+                         vsp_enable_file=args.vsp_enable_file,
+                         vsp_rollback_file=args.vsp_rollback_file,
+                         vsp_default_lease_seconds=args.vsp_default_lease_seconds,
+                         automation_enabled=args.automation,
+                         automation_enable_file=args.automation_enable_file,
+                         automation_state_file=args.automation_state_file,
+                         clock_sync_state_file=args.clock_sync_state_file,
                          )
     if args.mqtt_username is not None:
         mqtt_password = args.mqtt_password if args.mqtt_password is not None else mqtt_password

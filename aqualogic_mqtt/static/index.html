@@ -105,6 +105,37 @@
       opacity: .9;
     }
 
+    .direct-controls {
+      margin-top: 16px;
+      color: #f3f7f8;
+      text-align: left;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .direct-controls h2 {
+      margin: 12px 0 7px;
+      font-size: 13px;
+    }
+    .button-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+    }
+    .button-grid.switches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .direct-controls button {
+      background: #4c6570;
+      font-size: 13px;
+      padding: 8px 5px;
+    }
+    .direct-controls button.active { background: #2e9d55; }
+    .direct-controls button.pending { background: #c07c18; }
+    .direct-controls button:disabled { opacity: .45; cursor: not-allowed; }
+    .equipment-state {
+      min-height: 1.2em;
+      color: #b7c6ca;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+
     .default-menu {
       margin-top: 16px;
       color: #f3f7f8;
@@ -205,6 +236,33 @@
 
     <div class="status" id="status">Connecting…</div>
 
+    <section class="direct-controls" aria-label="Direct PL-PLUS controls">
+      <h2>Mode</h2>
+      <div class="button-grid" id="mode-controls">
+        <button data-mode="pool">Pool</button>
+        <button data-mode="spa">Spa</button>
+        <button data-mode="spillover">Spillover</button>
+      </div>
+
+      <h2>Pump Speed</h2>
+      <div class="button-grid" id="speed-controls">
+        <button data-speed="speed1">Speed 1</button>
+        <button data-speed="speed2">Speed 2</button>
+        <button data-speed="speed3">Speed 3</button>
+        <button data-speed="speed4">Speed 4</button>
+        <button data-speed-clear="true">Resume Sch</button>
+      </div>
+
+      <h2>Equipment</h2>
+      <div class="button-grid switches" id="switch-controls">
+        <button data-switch="auto_heat">Auto Heat</button>
+        <button data-switch="heater_relay">Heater Relay</button>
+        <button data-switch="lights">Lights</button>
+        <button data-switch="blower">Blower</button>
+      </div>
+      <div class="equipment-state" id="equipment-state">Loading controller state…</div>
+    </section>
+
     <div class="default-menu">
       <div class="default-menu-header">
         <div class="default-menu-title">Recent Values</div>
@@ -239,6 +297,9 @@
   const statusEl  = document.getElementById('status');
   const cacheStateEl = document.getElementById('cache-state');
   const defaultRowsEl = document.getElementById('default-menu-rows');
+  const equipmentStateEl = document.getElementById('equipment-state');
+  let equipmentState = null;
+  let equipmentCommandPending = false;
 
   function collapseLines(lines) {
     // Trim each piece, drop NULs, collapse multi-spaces
@@ -329,7 +390,106 @@
       setTimeout(pollDefaultMenu, 1000);
     }
   }
+
+  function renderEquipment(state) {
+    equipmentState = state;
+    const automationEnabled = state.automation?.enabled === true;
+    // A scheduled VSP lease remains busy while it holds the requested speed.
+    // Semantic controls are still safe: with automation enabled they update
+    // desired state and the reconciler serializes the eventual hardware work.
+    const directOperationBusy = !automationEnabled && (state.busy || state.vsp?.busy);
+    const blocked = !state.available || state.service_mode || directOperationBusy;
+    document.querySelectorAll('button[data-mode]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === state.mode);
+      btn.classList.toggle('pending', btn.dataset.mode === state.target_mode);
+      btn.disabled = blocked || equipmentCommandPending;
+    });
+    document.querySelectorAll('button[data-switch]').forEach(btn => {
+      const isPoolHeat = btn.dataset.switch === 'auto_heat' && automationEnabled;
+      const active = isPoolHeat
+        ? state.automation?.pool_heat_enabled === true
+        : state[btn.dataset.switch] === true;
+      btn.classList.toggle('active', active);
+      btn.disabled = blocked || equipmentCommandPending;
+    });
+    document.querySelectorAll('button[data-speed]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.speed === state.vsp?.target_name);
+      btn.disabled = blocked || (!automationEnabled && !state.vsp?.enabled) || equipmentCommandPending;
+    });
+    const release = document.querySelector('button[data-speed-clear]');
+    const manualSpeed = state.automation?.manual_override?.pump_preset;
+    release.disabled = (!state.vsp?.busy && !manualSpeed) || equipmentCommandPending;
+
+    const details = [];
+    if (state.service_mode) details.push('Service mode: controls inhibited');
+    else details.push(`Mode: ${state.mode || 'unknown'}`);
+    if (state.vsp?.requested_speed_pct != null) details.push(`Pump: ${state.vsp.requested_speed_pct}%`);
+    if (!state.vsp?.enabled) details.push('Speed driver disabled');
+    if (state.last_error) details.push(state.last_error);
+    if (state.vsp?.last_error) details.push(state.vsp.last_error);
+    equipmentStateEl.textContent = details.join(' · ');
+  }
+
+  async function pollEquipment() {
+    try {
+      const res = await fetch('/api/equipment', { cache: 'no-store' });
+      if (!res.ok) throw new Error(res.statusText);
+      renderEquipment(await res.json());
+    } catch (e) {
+      equipmentStateEl.textContent = 'Equipment state unavailable';
+    } finally {
+      setTimeout(pollEquipment, 1000);
+    }
+  }
+
+  async function postControl(path, body, method = 'POST') {
+    equipmentCommandPending = true;
+    try {
+      const res = await fetch(path, {
+        method,
+        headers: {'Content-Type': 'application/json'},
+        body: method === 'DELETE' ? undefined : JSON.stringify(body)
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(result.error || res.statusText);
+      equipmentStateEl.textContent = 'Command accepted';
+    } catch (e) {
+      equipmentStateEl.textContent = `Command failed: ${e.message}`;
+    } finally {
+      equipmentCommandPending = false;
+    }
+  }
+
+  document.querySelectorAll('button[data-mode]').forEach(btn => {
+    btn.addEventListener('click', () => postControl('/api/control/mode', {target: btn.dataset.mode}));
+  });
+  document.querySelectorAll('button[data-switch]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const name = btn.dataset.switch;
+      const automationEnabled = equipmentState?.automation?.enabled === true;
+      const current = name === 'auto_heat' && automationEnabled
+        ? equipmentState?.automation?.pool_heat_enabled === true
+        : equipmentState?.[name] === true;
+      postControl('/api/control/switch', {control: name, target: !current});
+    });
+  });
+  document.querySelectorAll('button[data-speed]').forEach(btn => {
+    btn.addEventListener('click', () => postControl('/api/control/pump-speed', {
+      target: btn.dataset.speed,
+      lease_seconds: 900
+    }));
+  });
+  document.querySelector('button[data-speed-clear]').addEventListener('click', () => {
+    postControl('/api/vsp/speed', {}, 'DELETE');
+  });
+
   async function sendKey(k) {
+    if (k === 'filter' && equipmentState?.automation?.enabled) {
+      return postControl('/api/control/switch', {
+        control: 'filter',
+        target: equipmentState.filter_on !== true
+      });
+    }
     try {
       const res = await fetch(`/api/key/${encodeURIComponent(k)}`, { method: 'POST' });
       await res.json().catch(()=>{});
@@ -354,6 +514,7 @@
 
   poll();
   pollDefaultMenu();
+  pollEquipment();
   </script>
 </body>
 </html>

@@ -6,6 +6,8 @@ import logging
 from functools import wraps
 from flask import Flask, jsonify, request, send_from_directory
 from . import controls
+from .vsp import VspBusyError, VspDisabledError, VspInterlockError
+from .equipment import EquipmentBusyError, EquipmentError
 
 def _basic_auth(user: str | None, pw: str | None):
     if not user or not pw:
@@ -44,6 +46,147 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
     @require_auth
     def api_default_menu():
         return jsonify(controls.get_default_menu())
+
+    @app.get("/api/vsp")
+    @require_auth
+    def api_vsp_status():
+        return jsonify(controls.get_vsp_status())
+
+    @app.post("/api/vsp/speed")
+    @require_auth
+    def api_vsp_speed():
+        body = request.get_json(silent=True) or {}
+        preset = body.get("preset")
+        if not preset:
+            return jsonify({"ok": False, "error": "JSON field 'preset' is required"}), 400
+        try:
+            status = controls.request_vsp_preset(preset, body.get("lease_seconds"))
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except VspDisabledError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        except VspInterlockError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+        except VspBusyError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({"ok": True, "status": status}), 202
+
+    @app.delete("/api/vsp/speed")
+    @require_auth
+    def api_vsp_clear():
+        try:
+            status = controls.clear_vsp_target()
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({"ok": True, "status": status})
+
+    @app.get("/api/equipment")
+    @require_auth
+    def api_equipment_status():
+        return jsonify(controls.get_equipment_status())
+
+    @app.get("/api/automation")
+    @require_auth
+    def api_automation_status():
+        return jsonify(controls.get_automation_status())
+
+    @app.post("/api/automation/manual")
+    @require_auth
+    def api_automation_manual():
+        body = request.get_json(silent=True) or {}
+        try:
+            status = controls.set_manual_override(body)
+        except (ValueError, TypeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({"ok": True, "status": status}), 202
+
+    @app.delete("/api/automation/manual")
+    @require_auth
+    def api_automation_manual_clear():
+        body = request.get_json(silent=True) or {}
+        try:
+            status = controls.clear_manual_override(body.get("field"))
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({"ok": True, "status": status})
+
+    @app.get("/api/openclaw/spa")
+    @require_auth
+    def api_openclaw_spa_status():
+        status = controls.get_automation_status()
+        session = status.get("openclaw_spa_session")
+        desired = status.get("desired") or {}
+        return jsonify({
+            "ok": True,
+            "active": bool(status.get("enabled")) and desired.get("source") == "calendar" and session is not None,
+            "session": session,
+            "desired": desired,
+            "automation_enabled": status.get("enabled"),
+        })
+
+    @app.post("/api/openclaw/spa")
+    @require_auth
+    def api_openclaw_spa_start():
+        body = request.get_json(silent=True) or {}
+        try:
+            status = controls.activate_openclaw_spa(body)
+        except (ValueError, TypeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({"ok": True, "status": status}), 202
+
+    @app.delete("/api/openclaw/spa")
+    @require_auth
+    def api_openclaw_spa_stop():
+        body = request.get_json(silent=True) or {}
+        try:
+            status = controls.stop_openclaw_spa(body.get("session_id"))
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({"ok": True, "status": status}), 202
+
+    @app.post("/api/control/switch")
+    @require_auth
+    def api_control_switch():
+        body = request.get_json(silent=True) or {}
+        try:
+            result = controls.set_equipment_switch(body.get("control"), body.get("target"))
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except (EquipmentError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+        return jsonify(result), 202
+
+    @app.post("/api/control/mode")
+    @require_auth
+    def api_control_mode():
+        body = request.get_json(silent=True) or {}
+        try:
+            status = controls.request_equipment_mode(body.get("target"))
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except (EquipmentBusyError, EquipmentError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+        return jsonify({"ok": True, "status": status}), 202
+
+    @app.post("/api/control/pump-speed")
+    @require_auth
+    def api_control_pump_speed():
+        body = request.get_json(silent=True) or {}
+        try:
+            status = controls.request_vsp_preset(body.get("target"), body.get("lease_seconds"))
+        except ValueError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except (VspBusyError, VspDisabledError, VspInterlockError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+        return jsonify({"ok": True, "status": status}), 202
 
     @app.post("/api/key/<keyname>")
     @require_auth
