@@ -280,6 +280,12 @@ enabled until explicitly turned off and is restored after a Spa session.
 Inspect the complete resolved state, local/UTC conversion, clock sync status,
 and active priority source at `/api/automation`.
 
+The WebUI disables its navigation and semantic control buttons while an
+automated hardware operation is actively applying, restoring, transitioning
+modes, synchronizing the clock, or waiting for PL-PLUS priming. A visible
+banner reports the current lock reason. A scheduled VSP lease in the stable
+`holding` phase does not lock the controls.
+
 Existing Home Assistant/Hubitat discovery IDs and command topics are unchanged.
 While host automation is enabled, Filter, Lights, Aux1/Blower, Aux2/Heater
 Relay, Auto Heat, Pool, and Spa commands on those topics remain supported.

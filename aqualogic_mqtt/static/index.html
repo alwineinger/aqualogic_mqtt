@@ -80,6 +80,12 @@
       font-size: clamp(16px, 2.2vh, 18px);
     }
     button:hover { background-color: #0097a7; }
+    button:disabled {
+      opacity: .35;
+      cursor: not-allowed;
+      filter: grayscale(.65);
+    }
+    button:disabled:hover { background-color: #00bcd4; }
     .up-button    { grid-column: 2; grid-row: 1; }
     .left-button  { grid-column: 1; grid-row: 2; }
     .center-button{ grid-column: 2; grid-row: 2; }
@@ -92,6 +98,17 @@
       margin-top: 10px;
       opacity: .9;
     }
+    .control-lock {
+      margin-top: 10px;
+      padding: 9px 10px;
+      color: #fff4dc;
+      background: #7a4d00;
+      border: 1px solid #d99a2b;
+      border-radius: 8px;
+      font: 700 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: left;
+    }
+    .control-lock[hidden] { display: none; }
 
     .direct-controls {
       margin-top: 16px;
@@ -212,6 +229,7 @@
     </div>
 
     <div class="status" id="status">Connecting…</div>
+    <div class="control-lock" id="control-lock" role="status" aria-live="polite" hidden></div>
 
     <section class="direct-controls" aria-label="Direct PL-PLUS controls">
       <h2>Mode</h2>
@@ -275,8 +293,11 @@
   const cacheStateEl = document.getElementById('cache-state');
   const defaultRowsEl = document.getElementById('default-menu-rows');
   const equipmentStateEl = document.getElementById('equipment-state');
+  const controlLockEl = document.getElementById('control-lock');
+  const panelEl = document.querySelector('.panel');
   let equipmentState = null;
   let equipmentCommandPending = false;
+  let controlsLocked = false;
 
   function collapseLines(lines) {
     // Trim each piece, drop NULs, collapse multi-spaces
@@ -371,11 +392,19 @@
   function renderEquipment(state) {
     equipmentState = state;
     const automationEnabled = state.automation?.enabled === true;
-    // A scheduled VSP lease remains busy while it holds the requested speed.
-    // Semantic controls are still safe: with automation enabled they update
-    // desired state and the reconciler serializes the eventual hardware work.
-    const directOperationBusy = !automationEnabled && (state.busy || state.vsp?.busy);
-    const blocked = !state.available || state.service_mode || directOperationBusy;
+    // The backend excludes a scheduled VSP `holding` lease from this flag.
+    // Only active hardware/menu reconciliation locks manual WebUI input.
+    controlsLocked = state.controls_locked === true || equipmentCommandPending;
+    controlLockEl.hidden = !controlsLocked;
+    controlLockEl.textContent = equipmentCommandPending
+      ? 'Command request in progress — controls temporarily locked'
+      : `${state.control_lock_reason || 'Automated control in progress'} — controls temporarily locked`;
+    panelEl.setAttribute('aria-busy', controlsLocked ? 'true' : 'false');
+    document.querySelectorAll('button[data-k]').forEach(btn => {
+      btn.disabled = controlsLocked;
+    });
+
+    const blocked = !state.available || state.service_mode || controlsLocked;
     document.querySelectorAll('button[data-mode]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.mode === state.mode);
       btn.classList.toggle('pending', btn.dataset.mode === state.target_mode);
@@ -395,7 +424,7 @@
     });
     const release = document.querySelector('button[data-speed-clear]');
     const manualSpeed = state.automation?.manual_override?.pump_preset;
-    release.disabled = (!state.vsp?.busy && !manualSpeed) || equipmentCommandPending;
+    release.disabled = blocked || (!state.vsp?.busy && !manualSpeed) || equipmentCommandPending;
 
     const details = [];
     if (state.service_mode) details.push('Service mode: controls inhibited');
@@ -421,6 +450,7 @@
 
   async function postControl(path, body, method = 'POST') {
     equipmentCommandPending = true;
+    if (equipmentState) renderEquipment(equipmentState);
     try {
       const res = await fetch(path, {
         method,
@@ -434,6 +464,7 @@
       equipmentStateEl.textContent = `Command failed: ${e.message}`;
     } finally {
       equipmentCommandPending = false;
+      if (equipmentState) renderEquipment(equipmentState);
     }
   }
 
@@ -461,6 +492,10 @@
   });
 
   async function sendKey(k) {
+    if (controlsLocked) {
+      statusEl.textContent = 'Manual key blocked by active controller work';
+      return;
+    }
     if (k === 'filter' && equipmentState?.automation?.enabled) {
       return postControl('/api/control/switch', {
         control: 'filter',

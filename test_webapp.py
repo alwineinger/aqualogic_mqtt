@@ -90,9 +90,69 @@ class WebApiContractTest(unittest.TestCase):
         response = create_app(static_dir=static_dir).test_client().get("/")
         html = response.get_data(as_text=True)
         self.assertIn("const automationEnabled = state.automation?.enabled === true", html)
-        self.assertIn("!automationEnabled && (state.busy || state.vsp?.busy)", html)
+        self.assertIn("controlsLocked = state.controls_locked === true || equipmentCommandPending", html)
+        self.assertIn("The backend excludes a scheduled VSP `holding` lease", html)
         self.assertIn("state.automation?.pool_heat_enabled === true", html)
         response.close()
+
+    def test_ui_visibly_locks_all_controls_during_automated_work(self):
+        static_dir = os.path.join(os.path.dirname(__file__), "aqualogic_mqtt", "static")
+        response = create_app(static_dir=static_dir).test_client().get("/")
+        html = response.get_data(as_text=True)
+        self.assertIn('id="control-lock"', html)
+        self.assertIn("controls temporarily locked", html)
+        self.assertIn("document.querySelectorAll('button[data-k]')", html)
+        self.assertIn("if (controlsLocked)", html)
+        response.close()
+
+    def test_equipment_status_locks_during_vsp_menu_work_but_not_holding(self):
+        equipment = MagicMock()
+        equipment.status.return_value = {"busy": False, "phase": "idle"}
+        vsp = MagicMock()
+        vsp.status.return_value = {
+            "busy": True,
+            "phase": "applying",
+            "hardware_priming": False,
+        }
+        automation = MagicMock()
+        automation.status.return_value = {"enabled": True, "phase": "setting_speed"}
+
+        with (
+            patch.object(controls, "_equipment", equipment),
+            patch.object(controls, "_vsp_driver", vsp),
+            patch.object(controls, "_automation", automation),
+        ):
+            active = controls.get_equipment_status()
+            self.assertTrue(active["controls_locked"])
+            self.assertIn("Pump control in progress", active["control_lock_reason"])
+
+            vsp.status.return_value["phase"] = "holding"
+            automation.status.return_value["phase"] = "holding_speed"
+            holding = controls.get_equipment_status()
+            self.assertFalse(holding["controls_locked"])
+            self.assertIsNone(holding["control_lock_reason"])
+
+    def test_equipment_status_locks_for_automation_reconciliation_phase(self):
+        equipment = MagicMock()
+        equipment.status.return_value = {"busy": False, "phase": "complete"}
+        vsp = MagicMock()
+        vsp.status.return_value = {
+            "busy": False,
+            "phase": "complete",
+            "hardware_priming": False,
+        }
+        automation = MagicMock()
+        automation.status.return_value = {"enabled": True, "phase": "setting_lights"}
+
+        with (
+            patch.object(controls, "_equipment", equipment),
+            patch.object(controls, "_vsp_driver", vsp),
+            patch.object(controls, "_automation", automation),
+        ):
+            status = controls.get_equipment_status()
+
+        self.assertTrue(status["controls_locked"])
+        self.assertIn("setting lights", status["control_lock_reason"])
 
     @patch("aqualogic_mqtt.webapp.controls.activate_openclaw_spa")
     def test_openclaw_spa_start_endpoint(self, activate):
