@@ -167,6 +167,17 @@ class VspDriverTest(unittest.TestCase):
         self.assertTrue(wait_until(lambda: not driver.is_busy()))
         self.assertEqual(controller.presets[1], 70)
 
+    def test_holding_lease_does_not_block_manual_menu_navigation(self):
+        controller = FakeController(active_preset=1)
+        driver = self.make_driver(controller, default_lease_seconds=5)
+        driver.request_preset("speed3")
+        self.assertTrue(wait_until(lambda: driver.status()["phase"] == "holding"))
+        self.assertTrue(driver.is_busy())
+        self.assertFalse(driver.is_menu_busy())
+        driver.clear_target()
+        self.assertTrue(wait_until(lambda: not driver.is_busy()))
+        self.assertFalse(driver.is_menu_busy())
+
     def test_persisted_rollback_recovers_after_process_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             rollback_file = os.path.join(directory, "rollback.json")

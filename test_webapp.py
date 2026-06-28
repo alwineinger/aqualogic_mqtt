@@ -1,7 +1,8 @@
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+from aqualogic_mqtt import controls
 from aqualogic_mqtt.webapp import create_app
 
 
@@ -42,6 +43,47 @@ class WebApiContractTest(unittest.TestCase):
         ):
             self.assertIn(marker, html)
         response.close()
+
+    def test_ui_hides_raw_filter_and_pool_spa_buttons(self):
+        static_dir = os.path.join(os.path.dirname(__file__), "aqualogic_mqtt", "static")
+        response = create_app(static_dir=static_dir).test_client().get("/")
+        html = response.get_data(as_text=True)
+        self.assertNotIn('data-k="filter"', html)
+        self.assertNotIn('data-k="pool_spa"', html)
+        for marker in ('data-k="menu"', 'data-k="plus"', 'data-k="minus"', 'data-k="left"', 'data-k="right"'):
+            self.assertIn(marker, html)
+        response.close()
+
+    def test_navigation_keys_work_while_vsp_lease_is_holding(self):
+        vsp = MagicMock()
+        vsp.is_busy.return_value = True
+        vsp.is_menu_busy.return_value = False
+        automation = MagicMock()
+        automation.hardware_busy.return_value = False
+        sender = MagicMock()
+        with (
+            patch.object(controls, "_vsp_driver", vsp),
+            patch.object(controls, "_automation", automation),
+            patch.object(controls, "_key_sender", sender),
+        ):
+            client = create_app().test_client()
+            for key in ("menu", "plus", "minus", "left", "right", "filter", "pool_spa"):
+                response = client.post(f"/api/key/{key}")
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(response.get_json()["ok"])
+        self.assertEqual(sender.call_count, 7)
+
+    def test_navigation_keys_remain_blocked_during_vsp_menu_write(self):
+        vsp = MagicMock()
+        vsp.is_menu_busy.return_value = True
+        sender = MagicMock()
+        with (
+            patch.object(controls, "_vsp_driver", vsp),
+            patch.object(controls, "_key_sender", sender),
+        ):
+            response = create_app().test_client().post("/api/key/menu")
+        self.assertFalse(response.get_json()["ok"])
+        sender.assert_not_called()
 
     def test_ui_does_not_treat_scheduled_vsp_hold_as_control_blocker(self):
         static_dir = os.path.join(os.path.dirname(__file__), "aqualogic_mqtt", "static")

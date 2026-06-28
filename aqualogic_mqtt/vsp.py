@@ -285,6 +285,18 @@ class VspDriver:
         with self._lock:
             return self._worker is not None and self._worker.is_alive()
 
+    def is_menu_busy(self) -> bool:
+        """Return whether a manual keypress could collide with VSP menu work.
+
+        A scheduled lease remains busy for its entire holding period, but the
+        driver has already returned PL-PLUS to the Default Menu by then. Raw
+        navigation is safe while holding and unsafe during every other live
+        worker phase.
+        """
+        with self._lock:
+            active = self._worker is not None and self._worker.is_alive()
+            return active and self._phase != "holding"
+
     def _line(self) -> str:
         value = self._display_reader()
         if isinstance(value, dict):
@@ -543,9 +555,11 @@ class VspDriver:
                 with self._lock:
                     self._edited_preset = active_preset
                     self._original_pct = original_pct
-                    self._phase = "holding"
+                    self._phase = "returning_to_default"
                     self._lease_expires_at = self._clock() + duration
                 self._return_to_default()
+                with self._lock:
+                    self._phase = "holding"
 
                 while not self._cancel.wait(min(0.25, duration)):
                     with self._lock:

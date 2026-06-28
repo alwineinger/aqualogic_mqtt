@@ -52,7 +52,7 @@
     }
     .controls-row {
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       align-items: center;
       margin-top: 12px;
       gap: 12px;
@@ -85,18 +85,6 @@
     .center-button{ grid-column: 2; grid-row: 2; }
     .right-button { grid-column: 3; grid-row: 2; }
     .down-button  { grid-column: 2; grid-row: 3; }
-
-    .aux-buttons { display:flex; gap:10px; }
-    .filter-btn button {
-      background-color: #4caf50;
-      padding: 12px 14px;
-    }
-    .filter-btn button:hover { background-color: #3e8e41; }
-    .poolspa-btn button {
-      background-color: #7b5cf0; /* purple-ish to differentiate */
-      padding: 12px 14px;
-    }
-    .poolspa-btn button:hover { background-color: #6a49e6; }
 
     .status {
       color: #ddd;
@@ -196,7 +184,7 @@
       color: #ffcc80;
     }
 
-    /* Very small screens: stack aux buttons under the pad */
+    /* Very small screens: let the navigation pad fill the panel. */
     @media (max-width: 420px) {
       .controls-row {
         flex-direction: column;
@@ -206,8 +194,6 @@
         width: 100%;
         min-width: 0;
       }
-      .aux-buttons { justify-content: space-between; }
-      .aux-buttons button { flex:1; }
     }
   </style>
 </head>
@@ -222,15 +208,6 @@
         <button class="center-button" data-k="menu">Menu</button>
         <button class="right-button"  data-k="right">&gt;</button>
         <button class="down-button"   data-k="minus">−</button>
-      </div>
-
-      <div class="aux-buttons">
-        <div class="filter-btn">
-          <button data-k="filter">Filter</button>
-        </div>
-        <div class="poolspa-btn">
-          <button data-k="pool_spa">Pool/Spa</button>
-        </div>
       </div>
     </div>
 
@@ -492,8 +469,13 @@
     }
     try {
       const res = await fetch(`/api/key/${encodeURIComponent(k)}`, { method: 'POST' });
-      await res.json().catch(()=>{});
-    } catch (_) { /* quiet */ }
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || result.ok !== true) {
+        statusEl.textContent = 'Manual key blocked by active controller work';
+      }
+    } catch (_) {
+      statusEl.textContent = 'Manual key request failed';
+    }
   }
 
   // Click handlers for all buttons

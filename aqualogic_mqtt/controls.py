@@ -247,7 +247,7 @@ def set_key_sender(sender: Callable[[object], None]) -> None:
 def enqueue_key(name: str) -> bool:
     """Queue a keypress by name (menu/left/right/minus/plus/filter/pool_spa)."""
     k = (name or "").strip().lower()
-    if _vsp_driver is not None and _vsp_driver.is_busy():
+    if _vsp_driver is not None and _vsp_driver.is_menu_busy():
         logger.info("controls: key '%s' blocked while VSP menu operation is active", k)
         return False
     if _automation is not None and _automation.hardware_busy():
