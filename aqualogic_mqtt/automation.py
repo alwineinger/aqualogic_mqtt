@@ -480,6 +480,12 @@ class AutomationEngine:
                     self._last_error = None
                 return False
 
+            if vsp.get("hardware_priming"):
+                with self._lock:
+                    self._phase = "waiting_for_hardware_prime"
+                    self._last_error = None
+                return False
+
             if self._clock_sync is not None and self._clock_sync.is_busy():
                 with self._lock:
                     self._phase = "clock_sync"

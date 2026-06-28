@@ -229,8 +229,10 @@ curl -X DELETE http://10.40.1.61:8089/api/vsp/speed
 Safety behavior:
 
 - Requests are rejected while the Filter LED is off or Service mode is on.
-- If the filter was off for more than 30 seconds, requests pause for the
-  controller's three-minute priming window after it comes back on.
+- The host never starts or estimates a priming interval. When PL-PLUS reports
+  `Prime`, `Priming`, or `Start Delay` on its live display/default-menu state,
+  automation pauses all reconciliation and resumes after that hardware-owned
+  indication clears.
 - Commissioning leases default to 60 seconds and are capped at 15 minutes.
 - The driver never falls back to the older Filter off/on speed-change helper.
 

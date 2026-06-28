@@ -35,12 +35,14 @@ class FakeController:
         self.presets = {1: 70, 2: 95, 3: 55, 4: 40}
         self.keys = []
         self.driver = None
+        self.cache_value = f"Speed{self.active_preset}"
+        self.cache_fresh = True
 
     def display(self):
         return {"lines": [self.screen, "", "", ""]}
 
     def cache(self):
-        return {"values": {"pumpSpeedName": {"value": f"Speed{self.active_preset}", "fresh": True}}}
+        return {"values": {"pumpSpeedName": {"value": self.cache_value, "fresh": self.cache_fresh}}}
 
     def send_key(self, key):
         self.keys.append(key)
@@ -222,15 +224,34 @@ class VspDriverTest(unittest.TestCase):
         with self.assertRaisesRegex(VspInterlockError, "not confirmed on"):
             driver.request_preset("speed2")
 
-    def test_off_over_30_seconds_starts_prime_guard(self):
+    def test_filter_restart_does_not_create_software_prime_timer(self):
         now = [100.0]
         controller = FakeController()
         driver = self.make_driver(controller, clock=lambda: now[0])
         driver.observe(PanelPumpState(filter_on=False, service_mode=False, observed_at=now[0]))
         now[0] += 31
         driver.observe(PanelPumpState(filter_on=True, service_mode=False, observed_at=now[0]))
-        with self.assertRaisesRegex(VspInterlockError, "priming window"):
+        self.assertFalse(driver.status()["hardware_priming"])
+
+    def test_hardware_prime_display_blocks_speed_until_released(self):
+        controller = FakeController()
+        driver = self.make_driver(controller)
+        controller.screen = "Filter Speed 100% Priming"
+        self.assertTrue(driver.status()["hardware_priming"])
+        with self.assertRaisesRegex(VspInterlockError, "hardware priming"):
             driver.request_preset("speed2")
+
+        controller.screen = "Filter Speed 70% Speed1"
+        self.assertFalse(driver.status()["hardware_priming"])
+
+    def test_hardware_prime_cache_must_be_fresh(self):
+        controller = FakeController()
+        driver = self.make_driver(controller)
+        controller.cache_value = "Start Delay"
+        self.assertTrue(driver.status()["hardware_priming"])
+
+        controller.cache_fresh = False
+        self.assertFalse(driver.status()["hardware_priming"])
 
 
 class VspApiTest(unittest.TestCase):

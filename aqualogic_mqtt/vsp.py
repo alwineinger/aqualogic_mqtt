@@ -32,6 +32,7 @@ PRESET_SPEEDS = {
 }
 
 _FILTER_SPEED_RE = re.compile(r"^filter\s+speed\s*([1-4])(?:\s+(\d+)\s*%)?$", re.I)
+_HARDWARE_PRIME_RE = re.compile(r"\bprim(?:e|ing)\b|\bstart\s+delay\b", re.I)
 
 
 class VspError(RuntimeError):
@@ -108,8 +109,6 @@ class VspDriver:
         sleep: Callable[[float], None] = time.sleep,
         default_lease_seconds: float = 60.0,
         max_lease_seconds: float = 15 * 60,
-        prime_seconds: float = 3 * 60,
-        prime_off_threshold_seconds: float = 30.0,
         poll_interval_seconds: float = 0.1,
         key_timeout_seconds: float = 6.0,
         key_retries: int = 3,
@@ -126,8 +125,6 @@ class VspDriver:
         self._sleep = sleep
         self._default_lease_seconds = float(default_lease_seconds)
         self._max_lease_seconds = float(max_lease_seconds)
-        self._prime_seconds = float(prime_seconds)
-        self._prime_off_threshold_seconds = float(prime_off_threshold_seconds)
         self._poll_interval_seconds = float(poll_interval_seconds)
         self._key_timeout_seconds = float(key_timeout_seconds)
         self._key_retries = int(key_retries)
@@ -140,8 +137,6 @@ class VspDriver:
         self._operation_lock = Lock()
         self._cancel = Event()
         self._state = PanelPumpState()
-        self._filter_off_since: Optional[float] = None
-        self._prime_until: Optional[float] = None
         self._operation_id: Optional[str] = None
         self._phase = "idle"
         self._target_pct: Optional[int] = None
@@ -158,7 +153,6 @@ class VspDriver:
     def observe(self, state: PanelPumpState) -> None:
         now = self._clock() if state.observed_at is None else float(state.observed_at)
         with self._lock:
-            previous_filter = self._state.filter_on
             self._state = PanelPumpState(
                 requested_speed_pct=state.requested_speed_pct,
                 pump_power_w=state.pump_power_w,
@@ -166,15 +160,29 @@ class VspDriver:
                 service_mode=state.service_mode,
                 observed_at=now,
             )
-            if state.filter_on is False:
-                if previous_filter is not False or self._filter_off_since is None:
-                    self._filter_off_since = now
-                self._prime_until = None
-            elif state.filter_on is True and previous_filter is False:
-                off_since = self._filter_off_since
-                self._filter_off_since = None
-                if off_since is not None and now - off_since > self._prime_off_threshold_seconds:
-                    self._prime_until = now + self._prime_seconds
+
+    def _hardware_prime_active(self) -> bool:
+        texts = []
+        try:
+            display = self._display_reader()
+            if isinstance(display, dict):
+                texts.extend(str(line) for line in (display.get("lines") or []))
+            else:
+                texts.append(str(display or ""))
+        except Exception:
+            pass
+
+        try:
+            values = (self._menu_cache_reader() or {}).get("values") or {}
+            for key in ("pumpSpeedName", "systemMsg"):
+                item = values.get(key) or {}
+                if item.get("fresh") is False:
+                    continue
+                texts.extend(str(item.get(field) or "") for field in ("value", "display", "source"))
+        except Exception:
+            pass
+
+        return any(_HARDWARE_PRIME_RE.search(text) for text in texts)
 
     def _assert_interlocks_locked(self, now: float) -> None:
         if not self._is_enabled_locked():
@@ -186,9 +194,8 @@ class VspDriver:
             raise VspInterlockError("hardware Service mode is active")
         if self._state.filter_on is not True:
             raise VspInterlockError("filter pump is not confirmed on; refusing to change speed")
-        if self._prime_until is not None and now < self._prime_until:
-            remaining = max(0, int(round(self._prime_until - now)))
-            raise VspInterlockError(f"PL-PLUS priming window is active for approximately {remaining}s")
+        if self._hardware_prime_active():
+            raise VspInterlockError("PL-PLUS hardware priming is active")
 
     def request_preset(
         self,
@@ -355,6 +362,8 @@ class VspDriver:
                 raise VspInterlockError("hardware Service mode became active")
             if self._state.filter_on is not True:
                 raise VspInterlockError("filter pump turned off during VSP operation")
+            if self._hardware_prime_active():
+                raise VspInterlockError("PL-PLUS hardware priming became active")
 
     def _active_preset(self) -> str:
         cache = self._menu_cache_reader() or {}
@@ -627,13 +636,11 @@ class VspDriver:
 
     def status(self) -> dict:
         now = self._clock()
+        hardware_priming = self._hardware_prime_active()
         with self._lock:
             lease_remaining = None
             if self._lease_expires_at is not None:
                 lease_remaining = max(0.0, self._lease_expires_at - now)
-            prime_remaining = None
-            if self._prime_until is not None and now < self._prime_until:
-                prime_remaining = max(0.0, self._prime_until - now)
             return {
                 "enabled": self._is_enabled_locked(),
                 "enable_file": self._enable_file,
@@ -651,7 +658,7 @@ class VspDriver:
                 "pump_power_w": self._state.pump_power_w,
                 "filter_on": self._state.filter_on,
                 "service_mode": self._state.service_mode,
-                "prime_remaining_sec": prime_remaining,
+                "hardware_priming": hardware_priming,
                 "verified": self._phase == "holding" and self._state.requested_speed_pct == self._target_pct,
                 "last_error": self._last_error,
             }

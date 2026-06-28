@@ -133,6 +133,7 @@ class FakeVsp:
             "target_name": None,
             "lease_remaining_sec": None,
             "rollback_pending": False,
+            "hardware_priming": False,
         }
         self.calls = []
 
@@ -204,6 +205,19 @@ class AutomationEngineTest(unittest.TestCase):
         vsp.state["lease_remaining_sec"] = 30
         self.assertTrue(engine.tick())
         self.assertEqual(vsp.calls[-1], ("speed", "speed1", "schedule"))
+
+    def test_hardware_priming_pauses_reconcile_until_controller_releases(self):
+        engine, equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
+        vsp.state["hardware_priming"] = True
+
+        self.assertFalse(engine.tick())
+        self.assertEqual(engine.status()["phase"], "waiting_for_hardware_prime")
+        self.assertEqual(equipment.calls, [])
+        self.assertEqual(vsp.calls, [])
+
+        vsp.state["hardware_priming"] = False
+        self.assertTrue(engine.tick())
+        self.assertEqual(vsp.calls, [("speed", "speed1", "schedule")])
 
     def test_calendar_releases_speed_before_entering_spa(self):
         now = ["2026-06-27T16:00:00Z"]
