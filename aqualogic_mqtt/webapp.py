@@ -168,6 +168,8 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
     @require_auth
     def api_control_mode():
         body = request.get_json(silent=True) or {}
+        if "target" not in body:
+            return jsonify({"ok": False, "error": "JSON field 'target' is required"}), 400
         try:
             status = controls.request_equipment_mode(body.get("target"))
         except ValueError as exc:
@@ -180,6 +182,8 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
     @require_auth
     def api_control_pump_speed():
         body = request.get_json(silent=True) or {}
+        if "target" not in body:
+            return jsonify({"ok": False, "error": "JSON field 'target' is required"}), 400
         try:
             status = controls.request_vsp_preset(body.get("target"), body.get("lease_seconds"))
         except ValueError as exc:
