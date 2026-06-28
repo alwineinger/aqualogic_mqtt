@@ -248,6 +248,68 @@ class AutomationEngineTest(unittest.TestCase):
         self.assertFalse(engine.tick())
         self.assertEqual(engine.status()["phase"], "converged")
 
+    def test_spillover_mode_keeps_active_pump_speed_lease(self):
+        now = ["2026-06-27T13:30:00Z"]
+        engine, equipment, vsp = self.make_engine(now)
+        engine.set_manual(mode="spillover")
+        vsp.state.update({
+            "busy": True,
+            "phase": "holding",
+            "target_name": "speed1",
+            "lease_remaining_sec": 80,
+        })
+
+        self.assertTrue(engine.tick())
+        self.assertEqual(equipment.calls, [("mode", "spillover")])
+        self.assertEqual(vsp.calls, [])
+
+    def test_cleanout_spillover_keeps_scheduled_speed_lease(self):
+        now = ["2026-06-27T13:30:00Z"]
+        engine, equipment, vsp = self.make_engine(now)
+        vsp.state.update({
+            "busy": True,
+            "phase": "holding",
+            "target_name": "speed1",
+            "lease_remaining_sec": 80,
+        })
+
+        self.assertTrue(engine.tick())
+        self.assertEqual(engine.status()["desired"]["source"], "cleanout")
+        self.assertEqual(equipment.calls, [("mode", "spillover")])
+        self.assertEqual(vsp.calls, [])
+
+    def test_spillover_waits_for_vsp_menu_without_cancelling_speed(self):
+        now = ["2026-06-27T13:30:00Z"]
+        engine, equipment, vsp = self.make_engine(now)
+        engine.set_manual(mode="spillover")
+        vsp.state.update({
+            "busy": True,
+            "phase": "navigating",
+            "target_name": "speed1",
+            "lease_remaining_sec": 80,
+        })
+
+        self.assertFalse(engine.tick())
+        self.assertEqual(engine.status()["phase"], "waiting_for_speed_before_spillover")
+        self.assertEqual(equipment.calls, [])
+        self.assertEqual(vsp.calls, [])
+
+    def test_spillover_renews_near_expiry_without_changing_speed(self):
+        now = ["2026-06-27T13:30:00Z"]
+        engine, equipment, vsp = self.make_engine(now)
+        engine.set_manual(mode="spillover")
+        vsp.state.update({
+            "busy": True,
+            "phase": "holding",
+            "target_name": "speed1",
+            "lease_remaining_sec": 20,
+        })
+
+        self.assertTrue(engine.tick())
+        self.assertEqual(engine.status()["phase"], "holding_speed_for_spillover")
+        self.assertEqual(equipment.calls, [])
+        self.assertEqual(vsp.calls, [("speed", "speed1", "manual")])
+
     def test_manual_override_is_utc_persisted_and_survives_restart(self):
         now = ["2026-06-27T13:30:00Z"]
         with tempfile.TemporaryDirectory() as directory:

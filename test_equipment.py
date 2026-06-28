@@ -65,15 +65,12 @@ class TransientPanel(FakePanel):
         self.transient_reads = 5
 
 
-class ValveDelayPanel(FakePanel):
-    def __init__(self):
-        super().__init__()
-        self.filter_reads_remaining = 0
+class RejectIntermediateSpaObservationPanel(FakePanel):
+    """Fail if control waits on Spa between Pool and Spillover keypresses."""
 
     def get_state(self, state):
-        if state == States.FILTER and self.filter_reads_remaining > 0:
-            self.filter_reads_remaining -= 1
-            return False
+        if self.mode() == "spa" and state in (States.POOL, States.SPA, States.SPILLOVER):
+            raise AssertionError("spillover transition observed intermediate Spa mode")
         return super().get_state(state)
 
 
@@ -120,7 +117,7 @@ class EquipmentControllerTest(unittest.TestCase):
             EquipmentController(panel, valve_settle_seconds=0).set_switch("lights", True)
 
     def test_mode_reaches_explicit_spillover(self):
-        panel = FakePanel()
+        panel = RejectIntermediateSpaObservationPanel()
         controller = EquipmentController(panel, poll_interval_seconds=0.001, valve_settle_seconds=0)
         accepted = controller.request_mode("spillover")
         self.assertTrue(accepted["busy"])
@@ -180,8 +177,8 @@ class EquipmentControllerTest(unittest.TestCase):
         self.assertEqual(controller.status()["mode"], "spa")
         self.assertEqual(panel.key_calls, [Keys.POOL_SPA])
 
-    def test_next_mode_key_waits_for_filter_after_valve_transition(self):
-        panel = ValveDelayPanel()
+    def test_spillover_from_pool_does_not_wait_in_spa(self):
+        panel = RejectIntermediateSpaObservationPanel()
         controller = EquipmentController(panel, poll_interval_seconds=0.001, valve_settle_seconds=0)
         controller.request_mode("spillover")
         deadline = time.monotonic() + 1
@@ -190,6 +187,7 @@ class EquipmentControllerTest(unittest.TestCase):
         self.assertEqual(controller.status()["phase"], "complete")
         self.assertEqual(controller.status()["mode"], "spillover")
         self.assertEqual(panel.key_calls, [Keys.POOL_SPA, Keys.POOL_SPA])
+        self.assertEqual(panel.set_calls, [])
 
 
 if __name__ == "__main__":

@@ -200,6 +200,23 @@ class EquipmentController:
             with self._lock:
                 self._phase = "transitioning"
             current = self._wait_current_mode()
+
+            # Pool -> Spillover requires two successive POOL/SPA selections on
+            # this controller. Send the pair without waiting for Spa to settle
+            # so Spa is never treated as an operating phase (which would also
+            # select the hardware Spa pump preset). Confirm and settle only the
+            # requested final Spillover state.
+            if target == "spillover" and current != target:
+                presses = 2 if current == "pool" else 1
+                for _ in range(presses):
+                    self._panel.send_key(Keys.POOL_SPA)
+                self._wait_mode("spillover")
+                self._settle_valves()
+                with self._lock:
+                    self._phase = "complete"
+                    self._last_error = None
+                return
+
             current_index = MODE_ORDER.index(current)
             target_index = MODE_ORDER.index(target)
             steps = (target_index - current_index) % len(MODE_ORDER)

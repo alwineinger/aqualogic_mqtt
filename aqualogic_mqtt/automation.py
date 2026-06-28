@@ -514,8 +514,10 @@ class AutomationEngine:
                         self._phase = "clock_sync"
                     return True
 
-            # Mode changes can select a different hardware pump preset. Always
-            # restore a leased Filter Speed edit before cycling Pool/Spa.
+            # Spa mode selects a different hardware pump preset, so release a
+            # leased Filter Speed edit before entering/leaving Spa. Spillover
+            # is different: it must retain the active speed and its transition
+            # is safe while a VSP lease is merely holding on the default menu.
             current_mode = equipment.get("mode")
             if current_mode not in ("pool", "spa", "spillover"):
                 with self._lock:
@@ -523,12 +525,34 @@ class AutomationEngine:
                     self._last_error = None
                 return False
 
-            if desired.suppress_filter_speed or current_mode != desired.mode:
+            mode_change = current_mode != desired.mode
+            spillover_change = mode_change and desired.mode == "spillover"
+            if desired.suppress_filter_speed or mode_change:
                 if vsp.get("busy"):
-                    self._vsp.clear_target()
-                    with self._lock:
-                        self._phase = "releasing_speed_for_mode"
-                    return True
+                    if spillover_change and vsp.get("phase") == "holding":
+                        # Do not cancel/roll back the current speed. Renew a
+                        # matching lease first if it could expire while valves
+                        # are moving; renewal changes no hardware speed.
+                        remaining = vsp.get("lease_remaining_sec") or 0
+                        held_target = vsp.get("target_name")
+                        if remaining < 45 and held_target is not None:
+                            self._vsp.request_preset(
+                                held_target,
+                                source=desired.source,
+                                lease_seconds=self._speed_lease_seconds,
+                            )
+                            with self._lock:
+                                self._phase = "holding_speed_for_spillover"
+                            return True
+                    elif spillover_change:
+                        with self._lock:
+                            self._phase = "waiting_for_speed_before_spillover"
+                        return False
+                    else:
+                        self._vsp.clear_target()
+                        with self._lock:
+                            self._phase = "releasing_speed_for_mode"
+                        return True
                 if equipment.get("busy"):
                     with self._lock:
                         self._phase = "waiting_for_mode"
