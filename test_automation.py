@@ -219,6 +219,19 @@ class AutomationEngineTest(unittest.TestCase):
         self.assertTrue(engine.tick())
         self.assertEqual(vsp.calls, [("speed", "speed1", "schedule")])
 
+    def test_unknown_mode_waits_without_requesting_hardware_transition(self):
+        engine, equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
+        equipment.state["mode"] = "unknown"
+
+        self.assertFalse(engine.tick())
+        self.assertEqual(engine.status()["phase"], "waiting_for_mode_observation")
+        self.assertEqual(equipment.calls, [])
+        self.assertEqual(vsp.calls, [])
+
+        equipment.state["mode"] = "pool"
+        self.assertTrue(engine.tick())
+        self.assertEqual(vsp.calls, [("speed", "speed1", "schedule")])
+
     def test_calendar_releases_speed_before_entering_spa(self):
         now = ["2026-06-27T16:00:00Z"]
         engine, equipment, vsp = self.make_engine(now)

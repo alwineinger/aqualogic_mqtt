@@ -75,6 +75,18 @@ class ValveDelayPanel(FakePanel):
             return False
         return super().get_state(state)
 
+
+class StartupUnknownPanel(FakePanel):
+    def __init__(self, unknown_mode_reads=6):
+        super().__init__()
+        self.unknown_mode_reads = unknown_mode_reads
+
+    def get_state(self, state):
+        if state in (States.POOL, States.SPA, States.SPILLOVER) and self.unknown_mode_reads > 0:
+            self.unknown_mode_reads -= 1
+            return False
+        return super().get_state(state)
+
     def send_key(self, key):
         super().send_key(key)
         self.filter_reads_remaining = 4
@@ -110,6 +122,44 @@ class EquipmentControllerTest(unittest.TestCase):
         self.assertEqual(controller.status()["mode"], "spillover")
         self.assertEqual(controller.status()["phase"], "complete")
         self.assertEqual(panel.key_calls, [Keys.POOL_SPA, Keys.POOL_SPA])
+
+    def test_mode_waits_for_stable_startup_observation_before_sending_key(self):
+        panel = StartupUnknownPanel()
+        controller = EquipmentController(panel, poll_interval_seconds=0.001, valve_settle_seconds=0)
+        controller.request_mode("spa")
+        deadline = time.monotonic() + 1
+        while controller.status()["busy"] and time.monotonic() < deadline:
+            time.sleep(0.001)
+
+        status = controller.status()
+        self.assertEqual(status["phase"], "complete")
+        self.assertIsNone(status["last_error"])
+        self.assertEqual(status["mode"], "spa")
+        self.assertEqual(panel.key_calls, [Keys.POOL_SPA])
+
+    def test_recovered_mode_observation_clears_transient_error(self):
+        panel = FakePanel()
+        panel.states[States.POOL] = False
+        controller = EquipmentController(
+            panel,
+            mode_timeout_seconds=0.005,
+            poll_interval_seconds=0.001,
+            valve_settle_seconds=0,
+        )
+        controller.request_mode("pool")
+        deadline = time.monotonic() + 1
+        while controller.status()["busy"] and time.monotonic() < deadline:
+            time.sleep(0.001)
+
+        failed = controller.status()
+        self.assertEqual(failed["phase"], "failed")
+        self.assertIn("timed out waiting for current PL-PLUS mode", failed["last_error"])
+
+        panel.states[States.POOL] = True
+        recovered = controller.status()
+        self.assertEqual(recovered["phase"], "recovered")
+        self.assertIsNone(recovered["last_error"])
+        self.assertEqual(recovered["mode"], "pool")
 
     def test_transient_state_map_reset_does_not_fail_or_duplicate_key(self):
         panel = TransientPanel()

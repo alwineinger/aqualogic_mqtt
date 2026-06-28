@@ -92,8 +92,23 @@ class EquipmentController:
 
     def status(self) -> dict:
         with self._lock:
+            mode = self.mode()
+            busy = self._worker is not None and self._worker.is_alive()
+            recovered_mode_observation = (
+                mode in MODE_ORDER
+                and not busy
+                and self._phase == "failed"
+                and bool(self._last_error)
+                and (
+                    self._last_error.startswith("current PL-PLUS mode is unknown")
+                    or self._last_error.startswith("timed out waiting for current PL-PLUS mode")
+                )
+            )
+            if recovered_mode_observation:
+                self._phase = "recovered"
+                self._last_error = None
             return {
-                "mode": self.mode(),
+                "mode": mode,
                 "service_mode": self._state(States.SERVICE),
                 "filter_on": self._state(States.FILTER),
                 "auto_heat": self._state(States.HEATER_AUTO_MODE),
@@ -103,7 +118,7 @@ class EquipmentController:
                 "operation_id": self._operation_id,
                 "phase": self._phase,
                 "target_mode": self._target_mode,
-                "busy": self._worker is not None and self._worker.is_alive(),
+                "busy": busy,
                 "last_error": self._last_error,
             }
 
@@ -154,6 +169,22 @@ class EquipmentController:
             self._sleep(self._poll_interval_seconds)
         raise EquipmentError(f"timed out waiting for {expected} mode (current={self.mode()})")
 
+    def _wait_current_mode(self) -> str:
+        """Wait for a stable initial mode before deciding which keys to send."""
+        deadline = self._clock() + self._mode_timeout_seconds
+        stable_reads = 0
+        last_mode = "unknown"
+        while self._clock() < deadline:
+            if self._state(States.SERVICE):
+                raise EquipmentError("hardware Service mode became active")
+            mode, fresh = self._mode_snapshot()
+            last_mode = mode
+            stable_reads = stable_reads + 1 if fresh and mode in MODE_ORDER else 0
+            if stable_reads >= 3:
+                return mode
+            self._sleep(self._poll_interval_seconds)
+        raise EquipmentError(f"timed out waiting for current PL-PLUS mode (current={last_mode})")
+
     def _settle_valves(self) -> None:
         deadline = self._clock() + self._valve_settle_seconds
         with self._lock:
@@ -167,9 +198,7 @@ class EquipmentController:
         try:
             with self._lock:
                 self._phase = "transitioning"
-            current = self.mode()
-            if current not in MODE_ORDER:
-                raise EquipmentError(f"current PL-PLUS mode is unknown: {current}")
+            current = self._wait_current_mode()
             current_index = MODE_ORDER.index(current)
             target_index = MODE_ORDER.index(target)
             steps = (target_index - current_index) % len(MODE_ORDER)

@@ -516,7 +516,14 @@ class AutomationEngine:
 
             # Mode changes can select a different hardware pump preset. Always
             # restore a leased Filter Speed edit before cycling Pool/Spa.
-            if desired.suppress_filter_speed or equipment.get("mode") != desired.mode:
+            current_mode = equipment.get("mode")
+            if current_mode not in ("pool", "spa", "spillover"):
+                with self._lock:
+                    self._phase = "waiting_for_mode_observation"
+                    self._last_error = None
+                return False
+
+            if desired.suppress_filter_speed or current_mode != desired.mode:
                 if vsp.get("busy"):
                     self._vsp.clear_target()
                     with self._lock:
@@ -526,7 +533,7 @@ class AutomationEngine:
                     with self._lock:
                         self._phase = "waiting_for_mode"
                     return False
-                if equipment.get("mode") != desired.mode:
+                if current_mode != desired.mode:
                     self._equipment.request_mode(desired.mode)
                     with self._lock:
                         self._phase = "setting_mode"
