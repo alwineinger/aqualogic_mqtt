@@ -16,6 +16,7 @@ class FakePanel:
             States.SERVICE: False,
             States.FILTER: True,
             States.HEATER_AUTO_MODE: False,
+            States.HEATER_1: False,
             States.AUX_2: True,
             States.LIGHTS: False,
             States.AUX_1: False,
@@ -104,6 +105,13 @@ class EquipmentControllerTest(unittest.TestCase):
             (States.AUX_2, False),
             (States.HEATER_AUTO_MODE, True),
         ])
+
+    def test_status_exposes_hardware_heater_running_state(self):
+        panel = FakePanel()
+        controller = EquipmentController(panel, valve_settle_seconds=0)
+        self.assertFalse(controller.status()["heater_running"])
+        panel.states[States.HEATER_1] = True
+        self.assertTrue(controller.status()["heater_running"])
 
     def test_service_mode_blocks_switch(self):
         panel = FakePanel()

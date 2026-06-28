@@ -113,6 +113,7 @@ class EquipmentController:
                 "filter_on": self._state(States.FILTER),
                 "auto_heat": self._state(States.HEATER_AUTO_MODE),
                 "heater_relay": self._state(States.AUX_2),
+                "heater_running": self._state(States.HEATER_1),
                 "lights": self._state(States.LIGHTS),
                 "blower": self._state(States.AUX_1),
                 "operation_id": self._operation_id,

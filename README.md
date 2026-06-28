@@ -279,6 +279,8 @@ is enabled, except Pool Heat. Pool Heat is a durable preference that remains
 enabled until explicitly turned off and is restored after a Spa session.
 Inspect the complete resolved state, local/UTC conversion, clock sync status,
 and active priority source at `/api/automation`.
+`/api/equipment` reports the PL-PLUS mode, equipment outputs, and the live
+`heater_running` LED state used by HAL for heating confirmation and health.
 
 The WebUI disables its navigation and semantic control buttons while an
 automated hardware operation is actively applying, restoring, transitioning
