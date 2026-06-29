@@ -462,8 +462,8 @@ class AutomationEngineTest(unittest.TestCase):
             self.assertEqual(status["manual_override"]["expires_utc"], "2026-06-28T01:30:00Z")
             self.assertEqual(status["desired"]["pump_preset"], "speed3")
 
-    def test_all_manual_overrides_release_once_at_one_am_new_york(self):
-        now = ["2026-06-27T04:59:00Z"]  # 00:59 EDT
+    def test_all_manual_overrides_release_once_at_three_am_new_york(self):
+        now = ["2026-06-27T06:59:00Z"]  # 02:59 EDT
         engine, _equipment, _vsp = self.make_engine(now)
         engine.set_manual(mode="pool", lights=True, blower=True, filter_on=False)
         engine.set_pool_heat(True)
@@ -471,34 +471,44 @@ class AutomationEngineTest(unittest.TestCase):
         engine.tick()
         self.assertIsNotNone(engine.status()["manual_override"])
 
-        now[0] = "2026-06-27T05:00:00Z"  # 01:00 EDT
+        now[0] = "2026-06-27T07:00:00Z"  # 03:00 EDT
         engine.tick()
         status = engine.status()
         self.assertIsNone(status["manual_override"])
         self.assertTrue(status["pool_heat_enabled"])
         self.assertEqual(status["last_manual_release_local_date"], "2026-06-27")
-        self.assertEqual(status["manual_release_time_local"], "01:00:00")
+        self.assertEqual(status["manual_release_time_local"], "03:00:00")
 
         # A new override after the daily checkpoint survives until tomorrow.
-        now[0] = "2026-06-27T05:30:00Z"
+        now[0] = "2026-06-27T07:30:00Z"
         engine.set_manual(blower=True)
         engine.tick()
         self.assertTrue(engine.status()["manual_override"]["blower"])
 
-    def test_repeated_fall_dst_one_am_does_not_release_twice(self):
-        now = ["2026-11-01T04:59:00Z"]  # 00:59 EDT
+    def test_fall_dst_transition_releases_at_three_am_standard_time(self):
+        now = ["2026-11-01T04:59:00Z"]  # 00:59 EDT, before fallback
         engine, _equipment, _vsp = self.make_engine(now)
         engine.set_manual(lights=True)
 
-        now[0] = "2026-11-01T05:00:00Z"  # first 01:00, EDT
+        now[0] = "2026-11-01T06:30:00Z"  # repeated 01:30, now EST
+        engine.tick()
+        self.assertTrue(engine.status()["manual_override"]["lights"])
+
+        now[0] = "2026-11-01T08:00:00Z"  # 03:00 EST
         engine.tick()
         self.assertIsNone(engine.status()["manual_override"])
 
-        now[0] = "2026-11-01T05:30:00Z"
-        engine.set_manual(lights=True)
-        now[0] = "2026-11-01T06:30:00Z"  # repeated 01:30, EST
+    def test_spring_dst_jump_releases_when_clock_reaches_three_am(self):
+        now = ["2026-03-08T06:59:00Z"]  # 01:59 EST
+        engine, _equipment, _vsp = self.make_engine(now)
+        engine.set_manual(blower=True)
+
+        now[0] = "2026-03-08T07:00:00Z"  # clocks jump to 03:00 EDT
         engine.tick()
-        self.assertTrue(engine.status()["manual_override"]["lights"])
+        self.assertIsNone(engine.status()["manual_override"])
+        self.assertEqual(
+            engine.status()["last_manual_release_local_date"], "2026-03-08"
+        )
 
     def test_restart_after_missed_one_am_catches_up(self):
         now = ["2026-06-27T12:00:00Z"]  # 08:00 EDT

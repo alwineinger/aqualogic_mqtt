@@ -19,6 +19,7 @@ from .vsp import PRESET_SPEEDS
 
 LOCAL_TIMEZONE = ZoneInfo("America/New_York")
 UTC = timezone.utc
+DAILY_MANUAL_RELEASE_TIME = time(3, 0)
 
 
 def utc_now() -> datetime:
@@ -263,7 +264,7 @@ class AutomationEngine:
     def _initial_manual_release_date(self) -> date:
         """Migration-safe baseline that never clears an override at upgrade time."""
         local_now = parse_utc(self._now()).astimezone(self._resolver.timezone)
-        if local_now.timetz().replace(tzinfo=None) >= time(1, 0):
+        if local_now.timetz().replace(tzinfo=None) >= DAILY_MANUAL_RELEASE_TIME:
             return local_now.date()
         return local_now.date() - timedelta(days=1)
 
@@ -518,7 +519,7 @@ class AutomationEngine:
 
     def _release_manual_for_daily_checkpoint(self, now: datetime) -> bool:
         local_now = parse_utc(now).astimezone(self._resolver.timezone)
-        if local_now.timetz().replace(tzinfo=None) < time(1, 0):
+        if local_now.timetz().replace(tzinfo=None) < DAILY_MANUAL_RELEASE_TIME:
             return False
         with self._lock:
             if self._last_manual_release_local_date >= local_now.date():
@@ -559,7 +560,7 @@ class AutomationEngine:
             "manual_override": self._manual_dict(manual) if manual is not None else None,
             "openclaw_spa_session": openclaw_spa,
             "pool_heat_enabled": pool_heat_enabled,
-            "manual_release_time_local": "01:00:00",
+            "manual_release_time_local": DAILY_MANUAL_RELEASE_TIME.isoformat(),
             "last_manual_release_local_date": last_manual_release_local_date.isoformat(),
         }
         if self._clock_sync is not None:
