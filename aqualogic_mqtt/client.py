@@ -80,6 +80,7 @@ class Client:
             self._panel,
             key_sender=self._panel.send_key,
             display_reader=controls.get_display,
+            service_mode_reader=lambda: bool(self._equipment.status().get("service_mode")),
         )
         controls.set_heater_target_driver(self._heater_targets)
         self._automation = AutomationEngine(

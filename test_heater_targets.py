@@ -72,6 +72,22 @@ class HeaterTargetDriverTest(unittest.TestCase):
             key_settle_seconds=0,
         )
 
+    def test_uses_injected_normalized_service_mode_reader(self):
+        panel = FakePanel()
+        panel.get_state = lambda _state: (_ for _ in ()).throw(KeyError("desired_states"))
+        driver = HeaterTargetDriver(
+            panel,
+            key_sender=panel.send_key,
+            display_reader=panel.display,
+            service_mode_reader=lambda: False,
+            state_file=None,
+            poll_interval_seconds=0.001,
+            key_timeout_seconds=0.2,
+            key_settle_seconds=0,
+        )
+        driver.request_refresh()
+        self.assertEqual(wait_complete(driver)["phase"], "complete")
+
     def test_parse_numeric_and_off_targets(self):
         self.assertEqual(parse_heater_target("Spa Heater1 102°F"), ("spa", 102))
         self.assertEqual(parse_heater_target("Pool Heater1 Off"), ("pool", None))

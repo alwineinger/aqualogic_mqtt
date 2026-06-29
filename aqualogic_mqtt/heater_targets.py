@@ -67,6 +67,7 @@ class HeaterTargetDriver:
         *,
         key_sender: Optional[Callable[[object], None]] = None,
         display_reader: Optional[Callable[[], object]] = None,
+        service_mode_reader: Optional[Callable[[], bool]] = None,
         state_file: Optional[str] = ".heater-target-state.json",
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
@@ -77,6 +78,7 @@ class HeaterTargetDriver:
         self._panel = panel
         self._key_sender = key_sender or getattr(panel, "send_key")
         self._display_reader = display_reader or (lambda: {"lines": [""]})
+        self._service_mode_reader = service_mode_reader
         self._state_file = str(state_file) if state_file else None
         self._clock = clock
         self._sleep = sleep
@@ -132,7 +134,12 @@ class HeaterTargetDriver:
 
     def _assert_available(self) -> None:
         try:
-            if bool(self._panel.get_state(States.SERVICE)):
+            service_mode = (
+                self._service_mode_reader()
+                if self._service_mode_reader is not None
+                else self._panel.get_state(States.SERVICE)
+            )
+            if bool(service_mode):
                 raise HeaterTargetError("hardware Service mode is active")
         except HeaterTargetError:
             raise
