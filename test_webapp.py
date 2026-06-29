@@ -20,7 +20,11 @@ class WebApiContractTest(unittest.TestCase):
 
     @patch("aqualogic_mqtt.webapp.controls.get_heater_target_status")
     def test_heater_target_query_contract(self, status):
-        status.return_value = {"available": True, "targets": {"pool": 85, "spa": 102}}
+        status.return_value = {
+            "available": True,
+            "targets": {"pool": 85, "spa": 102},
+            "known": {"pool": True, "spa": True},
+        }
         response = self.client.get("/api/heater-targets")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["targets"]["spa"], 102)

@@ -98,6 +98,7 @@ class HeaterTargetDriver:
         self._target_body: Optional[str] = None
         self._target_f: Optional[int] = None
         self._targets: dict[str, Optional[int]] = {"pool": None, "spa": None}
+        self._known: dict[str, bool] = {"pool": False, "spa": False}
         self._observed_at_utc: Optional[str] = None
         self._last_error: Optional[str] = None
         self._load()
@@ -109,9 +110,11 @@ class HeaterTargetDriver:
             with open(self._state_file, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
             targets = payload.get("targets") or {}
+            known = payload.get("known") or {}
             for body in ("pool", "spa"):
                 value = targets.get(body)
                 self._targets[body] = value if isinstance(value, int) else None
+                self._known[body] = bool(known.get(body, body in targets))
             self._observed_at_utc = payload.get("observed_at_utc")
         except Exception as exc:
             self._last_error = f"heater target state load failed: {exc}"
@@ -122,6 +125,7 @@ class HeaterTargetDriver:
         payload = {
             "version": 1,
             "targets": dict(self._targets),
+            "known": dict(self._known),
             "observed_at_utc": self._observed_at_utc,
         }
         parent = os.path.dirname(os.path.abspath(self._state_file))
@@ -306,6 +310,7 @@ class HeaterTargetDriver:
 
             with self._lock:
                 self._targets = {"pool": pool, "spa": spa}
+                self._known = {"pool": True, "spa": True}
                 self._observed_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 self._phase = "returning_to_default"
                 self._save_locked()
@@ -336,6 +341,7 @@ class HeaterTargetDriver:
                 "target_body": self._target_body,
                 "target_f": self._target_f,
                 "targets": dict(self._targets),
+                "known": dict(self._known),
                 "observed_at_utc": self._observed_at_utc,
                 "last_error": self._last_error,
                 "minimum_f": MIN_TARGET_F,

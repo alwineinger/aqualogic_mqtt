@@ -110,7 +110,7 @@ function state(overrides = {}) {
     filter_on: true,
     heater_targets: {
       available: true, busy: false, phase: 'complete', minimum_f: 65, maximum_f: 104,
-      targets: {pool: 85, spa: 102},
+      targets: {pool: 85, spa: 102}, known: {pool: true, spa: true},
     },
     vsp: {enabled: true, busy: true, phase: 'holding', target_name: 'speed1'},
     automation: {
@@ -213,8 +213,17 @@ expectButton(temperatureButtons[1], {active: false, pending: true, disabled: tru
 expectButton(navButtons[0], {active: false, pending: false, disabled: true});
 render(state({heater_targets: {
   available: true, busy: false, phase: 'complete', minimum_f: 65, maximum_f: 104,
-  targets: {pool: 85, spa: 103},
+  targets: {pool: 85, spa: 103}, known: {pool: true, spa: true},
 }}));
 expectButton(temperatureButtons[1], {active: false, pending: false, disabled: false});
+
+render(state({heater_targets: {
+  available: true, busy: false, phase: 'complete', minimum_f: 65, maximum_f: 104,
+  targets: {pool: null, spa: null}, known: {pool: true, spa: true},
+}}));
+assert.strictEqual(temperatureButtons[0].textContent, 'Pool Off');
+assert.strictEqual(temperatureButtons[1].textContent, 'Spa Off');
+temperatureButtons[0].listeners.click();
+assert.strictEqual(elements['temperature-value'].textContent, '65°F');
 
 console.log('WebUI pending-state tests passed.');

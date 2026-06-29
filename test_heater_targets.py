@@ -108,6 +108,7 @@ class HeaterTargetDriverTest(unittest.TestCase):
         driver.request_refresh()
         status = wait_complete(driver)
         self.assertEqual(status["targets"], {"pool": 85, "spa": 102})
+        self.assertEqual(status["known"], {"pool": True, "spa": True})
         self.assertNotIn(Keys.PLUS, panel.keys)
         self.assertNotIn(Keys.MINUS, panel.keys)
         self.assertEqual(panel.page, "default")
@@ -132,7 +133,18 @@ class HeaterTargetDriverTest(unittest.TestCase):
             self.assertEqual(status["phase"], "complete")
             self.assertEqual(panel.targets, {"pool": 87, "spa": 102})
             with open(state_file, encoding="utf-8") as handle:
-                self.assertEqual(json.load(handle)["targets"]["pool"], 87)
+                saved = json.load(handle)
+                self.assertEqual(saved["targets"]["pool"], 87)
+                self.assertTrue(saved["known"]["pool"])
+
+    def test_off_is_known_and_distinct_from_not_yet_read(self):
+        panel = FakePanel(pool=None, spa=None)
+        driver = self.make_driver(panel, state_file=None)
+        self.assertEqual(driver.status()["known"], {"pool": False, "spa": False})
+        driver.request_refresh()
+        status = wait_complete(driver)
+        self.assertEqual(status["targets"], {"pool": None, "spa": None})
+        self.assertEqual(status["known"], {"pool": True, "spa": True})
 
     def test_rejects_out_of_range_and_service_mode(self):
         panel = FakePanel()

@@ -368,10 +368,10 @@
         && speedConfirmed;
     }
     if (command.kind === 'temperature-refresh') {
-      const targets = state.heater_targets?.targets || {};
       return state.heater_targets?.busy !== true
         && state.heater_targets?.phase === 'complete'
-        && (targets.pool != null || targets.spa != null);
+        && state.heater_targets?.known?.pool === true
+        && state.heater_targets?.known?.spa === true;
     }
     if (command.kind === 'temperature') {
       return state.heater_targets?.busy !== true
@@ -560,8 +560,9 @@
     document.querySelectorAll('button[data-temperature-body]').forEach(btn => {
       const body = btn.dataset.temperatureBody;
       const target = targetStatus.targets?.[body];
+      const known = targetStatus.known?.[body] === true;
       const label = body.charAt(0).toUpperCase() + body.slice(1);
-      btn.textContent = `${label} ${target == null ? '--' : `${target}°F`}`;
+      btn.textContent = `${label} ${known ? (target == null ? 'Off' : `${target}°F`) : '--'}`;
       const temperaturePending = pendingControl?.kind === 'temperature'
         && pendingControl.body === body;
       setButtonState(btn, {
@@ -677,13 +678,14 @@
     btn.addEventListener('click', () => {
       const body = btn.dataset.temperatureBody;
       const current = equipmentState?.heater_targets?.targets?.[body];
-      if (current == null) {
+      const known = equipmentState?.heater_targets?.known?.[body] === true;
+      if (!known) {
         return postControl(
           '/api/heater-targets/refresh', {}, 'POST', {kind: 'temperature-refresh'}
         );
       }
       selectedTemperatureBody = body;
-      stagedTemperatureF = current;
+      stagedTemperatureF = current ?? equipmentState?.heater_targets?.minimum_f ?? 65;
       renderEquipment(equipmentState);
     });
   });
