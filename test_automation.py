@@ -263,6 +263,22 @@ class AutomationEngineTest(unittest.TestCase):
         self.assertEqual(equipment.calls, [("mode", "spillover")])
         self.assertEqual(vsp.calls, [])
 
+    def test_spillover_to_pool_changes_only_mode_and_keeps_pump_speed(self):
+        now = ["2026-06-27T13:30:00Z"]
+        engine, equipment, vsp = self.make_engine(now)
+        equipment.state["mode"] = "spillover"
+        engine.set_manual(mode="pool")
+        vsp.state.update({
+            "busy": True,
+            "phase": "holding",
+            "target_name": "speed1",
+            "lease_remaining_sec": 80,
+        })
+
+        self.assertTrue(engine.tick())
+        self.assertEqual(equipment.calls, [("mode", "pool")])
+        self.assertEqual(vsp.calls, [])
+
     def test_cleanout_spillover_keeps_scheduled_speed_lease(self):
         now = ["2026-06-27T13:30:00Z"]
         engine, equipment, vsp = self.make_engine(now)
@@ -290,7 +306,7 @@ class AutomationEngineTest(unittest.TestCase):
         })
 
         self.assertFalse(engine.tick())
-        self.assertEqual(engine.status()["phase"], "waiting_for_speed_before_spillover")
+        self.assertEqual(engine.status()["phase"], "waiting_for_speed_before_mode")
         self.assertEqual(equipment.calls, [])
         self.assertEqual(vsp.calls, [])
 
@@ -306,7 +322,7 @@ class AutomationEngineTest(unittest.TestCase):
         })
 
         self.assertTrue(engine.tick())
-        self.assertEqual(engine.status()["phase"], "holding_speed_for_spillover")
+        self.assertEqual(engine.status()["phase"], "holding_speed_for_mode")
         self.assertEqual(equipment.calls, [])
         self.assertEqual(vsp.calls, [("speed", "speed1", "manual")])
 

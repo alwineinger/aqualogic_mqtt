@@ -629,14 +629,18 @@ class AutomationEngine:
                     return True
 
             # Spa mode selects a different hardware pump preset, so release a
-            # leased Filter Speed edit before entering/leaving Spa. Spillover
-            # is different: it must retain the active speed and its transition
-            # is safe while a VSP lease is merely holding on the default menu.
+            # leased Filter Speed edit before entering/leaving Spa. Pool and
+            # Spillover share the Filter preset: transitions in either direction
+            # must retain the active speed and change only the valve mode.
             mode_change = current_mode != desired.mode
-            spillover_change = mode_change and desired.mode == "spillover"
+            speed_preserving_mode_change = (
+                mode_change
+                and current_mode in ("pool", "spillover")
+                and desired.mode in ("pool", "spillover")
+            )
             if desired.suppress_filter_speed or mode_change:
                 if vsp.get("busy"):
-                    if spillover_change and vsp.get("phase") == "holding":
+                    if speed_preserving_mode_change and vsp.get("phase") == "holding":
                         # Do not cancel/roll back the current speed. Renew a
                         # matching lease first if it could expire while valves
                         # are moving; renewal changes no hardware speed.
@@ -649,11 +653,11 @@ class AutomationEngine:
                                 lease_seconds=self._speed_lease_seconds,
                             )
                             with self._lock:
-                                self._phase = "holding_speed_for_spillover"
+                                self._phase = "holding_speed_for_mode"
                             return True
-                    elif spillover_change:
+                    elif speed_preserving_mode_change:
                         with self._lock:
-                            self._phase = "waiting_for_speed_before_spillover"
+                            self._phase = "waiting_for_speed_before_mode"
                         return False
                     else:
                         self._vsp.clear_target()

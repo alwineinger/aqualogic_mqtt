@@ -144,10 +144,12 @@ def _web_control_lock(equipment: dict, vsp: dict, automation: dict) -> tuple[boo
         or automation_phase in {
             "changing_speed",
             "clock_sync",
+            "holding_speed_for_mode",
             "waiting_for_prep_speed",
             "waiting_for_prep_speed_recovery",
             "waiting_for_clock",
             "waiting_for_mode",
+            "waiting_for_speed_before_mode",
             "waiting_for_speed_recovery",
         }
     )
