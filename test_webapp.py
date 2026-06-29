@@ -1,4 +1,5 @@
 import os
+import subprocess
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -90,7 +91,7 @@ class WebApiContractTest(unittest.TestCase):
         response = create_app(static_dir=static_dir).test_client().get("/")
         html = response.get_data(as_text=True)
         self.assertIn("const automationEnabled = state.automation?.enabled === true", html)
-        self.assertIn("controlsLocked = state.controls_locked === true || equipmentCommandPending", html)
+        self.assertIn("controlsLocked = state.controls_locked === true || pendingControl !== null", html)
         self.assertIn("The backend excludes a scheduled VSP `holding` lease", html)
         self.assertIn("state.automation?.pool_heat_enabled === true", html)
         response.close()
@@ -104,6 +105,32 @@ class WebApiContractTest(unittest.TestCase):
         self.assertIn("document.querySelectorAll('button[data-k]')", html)
         self.assertIn("if (controlsLocked)", html)
         response.close()
+
+    def test_ui_shows_optimistic_pending_state_until_hardware_confirmation(self):
+        static_dir = os.path.join(os.path.dirname(__file__), "aqualogic_mqtt", "static")
+        response = create_app(static_dir=static_dir).test_client().get("/")
+        html = response.get_data(as_text=True)
+        for marker in (
+            "let pendingControl = null",
+            "function commandCompleted(state, command)",
+            "active: modePending == null && btn.dataset.mode === state.mode",
+            "active: !speedGroupPending && btn.dataset.speed === state.vsp?.target_name",
+            "setButtonState(btn, {active: !switchPending && active, pending: switchPending})",
+            "pendingControl?.token === commandToken",
+            "Command in progress — controls temporarily locked",
+            ".direct-controls button.pending:disabled",
+        ):
+            self.assertIn(marker, html)
+        response.close()
+
+    def test_ui_pending_state_runtime(self):
+        result = subprocess.run(
+            ["node", os.path.join(os.path.dirname(__file__), "test_webui_pending.js")],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("WebUI pending-state tests passed", result.stdout)
 
     def test_equipment_status_locks_during_vsp_menu_work_but_not_holding(self):
         equipment = MagicMock()

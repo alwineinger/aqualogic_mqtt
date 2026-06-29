@@ -132,7 +132,12 @@
       padding: 8px 5px;
     }
     .direct-controls button.active { background: #2e9d55; }
-    .direct-controls button.pending { background: #c07c18; }
+    .direct-controls button.pending,
+    .direct-controls button.pending:disabled {
+      background: #c07c18;
+      opacity: 1;
+      filter: none;
+    }
     .direct-controls button:disabled { opacity: .45; cursor: not-allowed; }
     .equipment-state {
       min-height: 1.2em;
@@ -296,8 +301,48 @@
   const controlLockEl = document.getElementById('control-lock');
   const panelEl = document.querySelector('.panel');
   let equipmentState = null;
-  let equipmentCommandPending = false;
+  let pendingControl = null;
   let controlsLocked = false;
+  const COMMAND_TIMEOUT_MS = 180000;
+
+  function commandCompleted(state, command) {
+    if (!command?.accepted || state.controls_locked === true || state.busy === true) return false;
+    if (command.kind === 'mode') {
+      return state.mode === command.target && state.target_mode == null;
+    }
+    if (command.kind === 'switch') {
+      return state[command.control] === command.target;
+    }
+    if (command.kind === 'speed') {
+      const phase = state.vsp?.phase;
+      if (command.target != null) {
+        return state.vsp?.target_name === command.target && phase === 'holding';
+      }
+      const manualSpeed = state.automation?.manual_override?.pump_preset;
+      const scheduledTarget = state.automation?.desired?.pump_preset;
+      return !manualSpeed && scheduledTarget != null
+        && state.vsp?.target_name === scheduledTarget
+        && phase === 'holding';
+    }
+    return false;
+  }
+
+  function reconcilePendingControl(state) {
+    if (!pendingControl) return;
+    if (Date.now() - pendingControl.startedAt > COMMAND_TIMEOUT_MS) {
+      pendingControl = null;
+      equipmentStateEl.textContent = 'Command confirmation timed out';
+      return;
+    }
+    if (commandCompleted(state, pendingControl)) pendingControl = null;
+  }
+
+  function setButtonState(button, {active = false, pending = false} = {}) {
+    button.classList.toggle('active', active);
+    button.classList.toggle('pending', pending);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.setAttribute('aria-busy', pending ? 'true' : 'false');
+  }
 
   function collapseLines(lines) {
     // Trim each piece, drop NULs, collapse multi-spaces
@@ -391,13 +436,14 @@
 
   function renderEquipment(state) {
     equipmentState = state;
+    reconcilePendingControl(state);
     const automationEnabled = state.automation?.enabled === true;
     // The backend excludes a scheduled VSP `holding` lease from this flag.
     // Only active hardware/menu reconciliation locks manual WebUI input.
-    controlsLocked = state.controls_locked === true || equipmentCommandPending;
+    controlsLocked = state.controls_locked === true || pendingControl !== null;
     controlLockEl.hidden = !controlsLocked;
-    controlLockEl.textContent = equipmentCommandPending
-      ? 'Command request in progress — controls temporarily locked'
+    controlLockEl.textContent = pendingControl
+      ? 'Command in progress — controls temporarily locked'
       : `${state.control_lock_reason || 'Automated control in progress'} — controls temporarily locked`;
     panelEl.setAttribute('aria-busy', controlsLocked ? 'true' : 'false');
     document.querySelectorAll('button[data-k]').forEach(btn => {
@@ -405,26 +451,47 @@
     });
 
     const blocked = !state.available || state.service_mode || controlsLocked;
+    const localModePending = pendingControl?.kind === 'mode' ? pendingControl.target : null;
+    const modePending = localModePending ?? state.target_mode ?? null;
     document.querySelectorAll('button[data-mode]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.mode === state.mode);
-      btn.classList.toggle('pending', btn.dataset.mode === state.target_mode);
-      btn.disabled = blocked || equipmentCommandPending;
+      setButtonState(btn, {
+        active: modePending == null && btn.dataset.mode === state.mode,
+        pending: btn.dataset.mode === modePending,
+      });
+      btn.disabled = blocked;
     });
     document.querySelectorAll('button[data-switch]').forEach(btn => {
       const isPoolHeat = btn.dataset.switch === 'auto_heat' && automationEnabled;
       const active = isPoolHeat
         ? state.automation?.pool_heat_enabled === true
         : state[btn.dataset.switch] === true;
-      btn.classList.toggle('active', active);
-      btn.disabled = blocked || equipmentCommandPending;
+      const switchPending = pendingControl?.kind === 'switch'
+        && pendingControl.control === btn.dataset.switch;
+      setButtonState(btn, {active: !switchPending && active, pending: switchPending});
+      btn.disabled = blocked;
     });
+    const localSpeedPending = pendingControl?.kind === 'speed' ? pendingControl : null;
+    const backendSpeedPending = state.vsp?.busy && state.vsp?.phase !== 'holding'
+      ? state.vsp?.target_name
+      : null;
+    const speedGroupPending = localSpeedPending !== null || backendSpeedPending != null;
+    const pendingSpeedTarget = localSpeedPending ? localSpeedPending.target : backendSpeedPending;
     document.querySelectorAll('button[data-speed]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.speed === state.vsp?.target_name);
-      btn.disabled = blocked || (!automationEnabled && !state.vsp?.enabled) || equipmentCommandPending;
+      setButtonState(btn, {
+        active: !speedGroupPending && btn.dataset.speed === state.vsp?.target_name,
+        pending: pendingSpeedTarget != null && btn.dataset.speed === pendingSpeedTarget,
+      });
+      btn.disabled = blocked || (!automationEnabled && !state.vsp?.enabled);
     });
     const release = document.querySelector('button[data-speed-clear]');
     const manualSpeed = state.automation?.manual_override?.pump_preset;
-    release.disabled = blocked || (!state.vsp?.busy && !manualSpeed) || equipmentCommandPending;
+    const releasePending = localSpeedPending !== null && localSpeedPending.target == null;
+    const scheduleActive = automationEnabled ? !manualSpeed : !state.vsp?.busy;
+    setButtonState(release, {
+      active: !speedGroupPending && scheduleActive,
+      pending: releasePending,
+    });
+    release.disabled = blocked || (!state.vsp?.busy && !manualSpeed);
 
     const details = [];
     if (state.service_mode) details.push('Service mode: controls inhibited');
@@ -448,8 +515,11 @@
     }
   }
 
-  async function postControl(path, body, method = 'POST') {
-    equipmentCommandPending = true;
+  async function postControl(path, body, method = 'POST', command = null) {
+    const commandToken = command ? `${Date.now()}-${Math.random()}` : null;
+    if (command) {
+      pendingControl = {...command, token: commandToken, accepted: false, startedAt: Date.now()};
+    }
     if (equipmentState) renderEquipment(equipmentState);
     try {
       const res = await fetch(path, {
@@ -459,17 +529,23 @@
       });
       const result = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(result.error || res.statusText);
+      if (pendingControl?.token === commandToken) pendingControl.accepted = true;
       equipmentStateEl.textContent = 'Command accepted';
     } catch (e) {
+      if (pendingControl?.token === commandToken) pendingControl = null;
       equipmentStateEl.textContent = `Command failed: ${e.message}`;
     } finally {
-      equipmentCommandPending = false;
       if (equipmentState) renderEquipment(equipmentState);
     }
   }
 
   document.querySelectorAll('button[data-mode]').forEach(btn => {
-    btn.addEventListener('click', () => postControl('/api/control/mode', {target: btn.dataset.mode}));
+    btn.addEventListener('click', () => postControl(
+      '/api/control/mode',
+      {target: btn.dataset.mode},
+      'POST',
+      {kind: 'mode', target: btn.dataset.mode}
+    ));
   });
   document.querySelectorAll('button[data-switch]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -478,17 +554,25 @@
       const current = name === 'auto_heat' && automationEnabled
         ? equipmentState?.automation?.pool_heat_enabled === true
         : equipmentState?.[name] === true;
-      postControl('/api/control/switch', {control: name, target: !current});
+      const target = !current;
+      postControl(
+        '/api/control/switch',
+        {control: name, target},
+        'POST',
+        {kind: 'switch', control: name, target}
+      );
     });
   });
   document.querySelectorAll('button[data-speed]').forEach(btn => {
-    btn.addEventListener('click', () => postControl('/api/control/pump-speed', {
-      target: btn.dataset.speed,
-      lease_seconds: 900
-    }));
+    btn.addEventListener('click', () => postControl(
+      '/api/control/pump-speed',
+      {target: btn.dataset.speed, lease_seconds: 900},
+      'POST',
+      {kind: 'speed', target: btn.dataset.speed}
+    ));
   });
   document.querySelector('button[data-speed-clear]').addEventListener('click', () => {
-    postControl('/api/vsp/speed', {}, 'DELETE');
+    postControl('/api/vsp/speed', {}, 'DELETE', {kind: 'speed', target: null});
   });
 
   async function sendKey(k) {

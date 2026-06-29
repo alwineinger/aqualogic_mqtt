@@ -291,6 +291,12 @@ modes, synchronizing the clock, or waiting for PL-PLUS priming. A visible
 banner reports the current lock reason. A scheduled VSP lease in the stable
 `holding` phase does not lock the controls.
 
+When a mode, speed, Resume Schedule, or equipment button is clicked, the new
+selection turns orange immediately and the superseded green selection clears.
+Controls remain locked until polled hardware state confirms completion, when
+the final selection turns green. Failed or timed-out commands restore the
+confirmed hardware presentation instead of leaving a false active state.
+
 Existing Home Assistant/Hubitat discovery IDs and command topics are unchanged.
 While host automation is enabled, Filter, Lights, Aux1/Blower, Aux2/Heater
 Relay, Auto Heat, Pool, and Spa commands on those topics remain supported.
