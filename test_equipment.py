@@ -289,7 +289,7 @@ class EquipmentControllerTest(unittest.TestCase):
         self.assertEqual(controller.status()["mode"], "spillover")
         self.assertEqual(panel.key_calls, [Keys.POOL_SPA, Keys.POOL_SPA])
         self.assertEqual(panel.set_calls, [])
-        self.assertEqual(sleep_calls.count(0.75), 1)
+        self.assertEqual(sleep_calls.count(0.5), 1)
 
     def test_spillover_confirmation_uses_15_second_deadline(self):
         panel = MissSecondSelectionPanel()

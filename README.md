@@ -270,7 +270,7 @@ The recurring schedule is interpreted in `America/New_York`:
 - Speed 3: 11:00–00:00 (55%)
 - Cleanout: 09:00–10:30 in Spillover mode
 - Pool↔Spillover transitions preserve the active pump speed and change only
-  valve mode. Pool→Spillover sends the two mode selections 750 ms apart without
+  valve mode. Pool→Spillover sends the two mode selections 500 ms apart without
   pausing in Spa, then allows 15 seconds to confirm only the final Spillover
   state.
 - Any uncovered pump interval falls back to Speed 4 while Service mode is off.

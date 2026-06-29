@@ -43,7 +43,7 @@ class EquipmentController:
         sleep: Callable[[float], None] = time.sleep,
         mode_timeout_seconds: float = 60.0,
         spillover_timeout_seconds: float = 15.0,
-        mode_selection_interval_seconds: float = 0.75,
+        mode_selection_interval_seconds: float = 0.5,
         poll_interval_seconds: float = 0.25,
         valve_settle_seconds: float = 35.0,
         switch_confirmation_seconds: float = 20.0,
@@ -310,7 +310,7 @@ class EquipmentController:
             current = self._wait_current_mode()
 
             # Pool -> Spillover requires two successive POOL/SPA selections on
-            # this controller. Space the selections by 750 ms, but do not wait
+            # this controller. Space the selections by 500 ms, but do not wait
             # for or settle in Spa, so Spa is never treated as an operating
             # phase (which would also select the hardware Spa pump preset).
             # Confirm and settle only the requested final Spillover state.
