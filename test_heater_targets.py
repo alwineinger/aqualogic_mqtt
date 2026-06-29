@@ -9,6 +9,7 @@ from aqualogic.states import States
 from aqualogic_mqtt.heater_targets import (
     HeaterTargetDriver,
     HeaterTargetError,
+    _page,
     parse_heater_target,
 )
 
@@ -92,6 +93,8 @@ class HeaterTargetDriverTest(unittest.TestCase):
         self.assertEqual(parse_heater_target("Spa Heater1 102°F"), ("spa", 102))
         self.assertEqual(parse_heater_target("Pool Heater1 Off"), ("pool", None))
         self.assertEqual(parse_heater_target("Pool Heater1 Manual Off"), ("pool", None))
+        self.assertEqual(_page("Spa Heater1"), "spa_heater")
+        self.assertEqual(_page("Pool Heater1"), "pool_heater")
 
     def test_refresh_reads_both_targets_without_changing_them(self):
         panel = FakePanel()

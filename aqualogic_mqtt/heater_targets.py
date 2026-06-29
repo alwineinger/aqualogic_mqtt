@@ -50,6 +50,12 @@ def _page(line: object) -> str:
         return "settings"
     if text == "default menu":
         return "default"
+    # The selected value blinks off periodically, leaving only the stable
+    # setting label. Page identity must not depend on the value being visible.
+    if text.startswith("spa heater1"):
+        return "spa_heater"
+    if text.startswith("pool heater1"):
+        return "pool_heater"
     try:
         body, _target = parse_heater_target(line)
         return f"{body}_heater"
