@@ -300,10 +300,25 @@ held pending until the Heater1 page confirms it, preventing repeated toggle
 keys.
 
 The WebUI globally disables navigation and semantic controls only while
-automation owns the PL-PLUS LCD menu, such as active VSP menu work or clock
-synchronization. Direct mode and equipment commands do not globally lock the
-interface. A scheduled VSP lease in the stable `holding` phase also does not
-lock the controls.
+automation owns the PL-PLUS LCD menu, such as active VSP menu work, heater
+target reads/writes, or clock synchronization. Direct mode and equipment
+commands do not globally lock the interface. A scheduled VSP lease in the
+stable `holding` phase also does not lock the controls.
+
+The Pump On button reflects and controls the PL-PLUS Filter relay independently
+of the selected speed preset. Pool and Spa target temperatures are cached under
+Equipment and can be staged with +/− before Confirm performs a serialized
+Settings-menu write. OpenClaw can use the same API directly:
+
+```bash
+curl http://127.0.0.1:8089/api/heater-targets
+curl -X POST http://127.0.0.1:8089/api/heater-targets/refresh
+curl -X POST http://127.0.0.1:8089/api/control/temperature \
+  -H 'Content-Type: application/json' -d '{"body":"spa","target_f":102}'
+```
+
+Numeric targets are restricted to the PL-PLUS range of 65–104°F. Hardware
+Service mode and concurrent LCD-menu work inhibit reads and writes.
 
 When a mode, speed, Resume Schedule, or equipment button is clicked, the action
 turns orange immediately and any superseded green selection clears. A pending

@@ -40,11 +40,18 @@ const switchButtons = ['auto_heat', 'heater_relay', 'lights', 'blower']
   .map(control => new Button({switch: control}));
 const navButtons = ['menu', 'plus', 'minus', 'left', 'right'].map(k => new Button({k}));
 const releaseButton = new Button({speedClear: 'true'});
+const pumpOnButton = new Button({pumpOn: 'true'});
+const temperatureButtons = ['pool', 'spa'].map(body => new Button({temperatureBody: body}));
+const temperatureAdjustButtons = ['minus', 'plus'].map(value => new Button({temperatureAdjust: value}));
+const temperatureRefreshButton = new Button({temperatureRefresh: 'true'});
+const temperatureConfirmButton = new Button({temperatureConfirm: 'true'});
+const temperatureCancelButton = new Button({temperatureCancel: 'true'});
 const panel = element();
 const elements = {
   display: element(), status: element(), 'cache-state': element(),
   'default-menu-rows': element(), 'equipment-state': element(),
   'control-lock': element(),
+  'temperature-editor': element(), 'temperature-value': element(),
 };
 
 const documentMock = {
@@ -53,6 +60,10 @@ const documentMock = {
   querySelector(selector) {
     if (selector === '.panel') return panel;
     if (selector === 'button[data-speed-clear]') return releaseButton;
+    if (selector === 'button[data-pump-on]') return pumpOnButton;
+    if (selector === 'button[data-temperature-refresh]') return temperatureRefreshButton;
+    if (selector === 'button[data-temperature-confirm]') return temperatureConfirmButton;
+    if (selector === 'button[data-temperature-cancel]') return temperatureCancelButton;
     throw new Error(`unexpected selector: ${selector}`);
   },
   querySelectorAll(selector) {
@@ -60,6 +71,8 @@ const documentMock = {
     if (selector === 'button[data-speed]') return speedButtons;
     if (selector === 'button[data-switch]') return switchButtons;
     if (selector === 'button[data-k]') return navButtons;
+    if (selector === 'button[data-temperature-body]') return temperatureButtons;
+    if (selector === 'button[data-temperature-adjust]') return temperatureAdjustButtons;
     throw new Error(`unexpected selector: ${selector}`);
   },
   createElement() { return element(); },
@@ -94,6 +107,11 @@ function state(overrides = {}) {
     lights: false,
     blower: false,
     controls_locked: false,
+    filter_on: true,
+    heater_targets: {
+      available: true, busy: false, phase: 'complete', minimum_f: 65, maximum_f: 104,
+      targets: {pool: 85, spa: 102},
+    },
     vsp: {enabled: true, busy: true, phase: 'holding', target_name: 'speed1'},
     automation: {
       enabled: true,
@@ -124,6 +142,9 @@ function setPending(value) {
 render(state());
 expectButton(modeButtons[0], {active: true, pending: false, disabled: false});
 expectButton(speedButtons[0], {active: true, pending: false, disabled: false});
+expectButton(pumpOnButton, {active: true, pending: false, disabled: false});
+assert.strictEqual(temperatureButtons[0].textContent, 'Pool 85°F');
+assert.strictEqual(temperatureButtons[1].textContent, 'Spa 102°F');
 
 setPending({kind: 'mode', target: 'spa', accepted: true, startedAt: Date.now()});
 render(state());
@@ -179,5 +200,21 @@ expectButton(navButtons[0], {active: false, pending: false, disabled: false});
 assert.strictEqual(elements['control-lock'].hidden, true);
 render(state({mode: 'spa', lights: true}));
 expectButton(switchButtons[2], {active: true, pending: false, disabled: false});
+
+setPending({kind: 'switch', control: 'filter', target: false, accepted: true, startedAt: Date.now()});
+render(state({mode: 'spa'}));
+expectButton(pumpOnButton, {active: false, pending: true, disabled: true});
+render(state({mode: 'spa', filter_on: false}));
+expectButton(pumpOnButton, {active: false, pending: false, disabled: false});
+
+setPending({kind: 'temperature', body: 'spa', target_f: 103, accepted: true, startedAt: Date.now()});
+render(state());
+expectButton(temperatureButtons[1], {active: false, pending: true, disabled: true});
+expectButton(navButtons[0], {active: false, pending: false, disabled: true});
+render(state({heater_targets: {
+  available: true, busy: false, phase: 'complete', minimum_f: 65, maximum_f: 104,
+  targets: {pool: 85, spa: 103},
+}}));
+expectButton(temperatureButtons[1], {active: false, pending: false, disabled: false});
 
 console.log('WebUI pending-state tests passed.');

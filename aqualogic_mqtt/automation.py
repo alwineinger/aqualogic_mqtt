@@ -235,6 +235,7 @@ class AutomationEngine:
         speed_lease_seconds: float = 90.0,
         manual_duration_seconds: float = 12 * 60 * 60,
         clock_sync: Optional[object] = None,
+        heater_targets: Optional[object] = None,
     ):
         self._equipment = equipment
         self._vsp = vsp
@@ -246,6 +247,7 @@ class AutomationEngine:
         self._speed_lease_seconds = float(speed_lease_seconds)
         self._manual_duration_seconds = float(manual_duration_seconds)
         self._clock_sync = clock_sync
+        self._heater_targets = heater_targets
         self._lock = Lock()
         self._tick_lock = Lock()
         self._manual_override: Optional[ManualOverride] = None
@@ -261,7 +263,10 @@ class AutomationEngine:
         return self._enabled or bool(self._enable_file and os.path.isfile(self._enable_file))
 
     def hardware_busy(self) -> bool:
-        return bool(self._clock_sync is not None and self._clock_sync.is_busy())
+        return bool(
+            (self._clock_sync is not None and self._clock_sync.is_busy())
+            or (self._heater_targets is not None and self._heater_targets.is_busy())
+        )
 
     @staticmethod
     def _manual_dict(manual: ManualOverride) -> dict:
@@ -523,6 +528,8 @@ class AutomationEngine:
         }
         if self._clock_sync is not None:
             result["clock_sync"] = self._clock_sync.status()
+        if self._heater_targets is not None:
+            result["heater_targets"] = self._heater_targets.status()
         return result
 
     def tick(self) -> bool:
@@ -558,6 +565,11 @@ class AutomationEngine:
                 with self._lock:
                     self._phase = "waiting_for_hardware_prime"
                     self._last_error = None
+                return False
+
+            if self._heater_targets is not None and self._heater_targets.is_busy():
+                with self._lock:
+                    self._phase = "heater_target"
                 return False
 
             if self._clock_sync is not None and self._clock_sync.is_busy():

@@ -9,6 +9,7 @@ from .default_menu import DefaultMenuCache
 from .vsp import VspDriver
 from .equipment import EquipmentController
 from .automation import AutomationEngine
+from .heater_targets import HeaterTargetDriver
 try:
     # Keys enum from swilson/aqualogic
     from aqualogic.keys import Keys
@@ -57,6 +58,7 @@ _default_menu = DefaultMenuCache()
 _vsp_driver: Optional[VspDriver] = None
 _equipment: Optional[EquipmentController] = None
 _automation: Optional[AutomationEngine] = None
+_heater_targets: Optional[HeaterTargetDriver] = None
 
 def update_display(lines: Optional[List[str]], blink: Optional[List[Tuple[int, int]]], leds: Optional[dict]) -> None:
     _state.update(lines, blink, leds)
@@ -83,6 +85,33 @@ def set_equipment_controller(controller: EquipmentController) -> None:
 def set_automation_engine(engine: AutomationEngine) -> None:
     global _automation
     _automation = engine
+
+def set_heater_target_driver(driver: HeaterTargetDriver) -> None:
+    global _heater_targets
+    _heater_targets = driver
+
+def get_heater_target_status() -> dict:
+    if _heater_targets is None:
+        return {"available": False, "busy": False, "last_error": "heater target driver is not registered"}
+    return _heater_targets.status()
+
+def refresh_heater_targets() -> dict:
+    if _heater_targets is None:
+        raise RuntimeError("heater target driver is not registered")
+    if _vsp_driver is not None and _vsp_driver.is_menu_busy():
+        raise RuntimeError("heater target read is blocked while a VSP menu operation is active")
+    if not _heater_targets.is_busy() and _automation is not None and _automation.hardware_busy():
+        raise RuntimeError("heater target read is blocked while another LCD menu operation is active")
+    return _heater_targets.request_refresh()
+
+def set_heater_target(body: str, target_f: int) -> dict:
+    if _heater_targets is None:
+        raise RuntimeError("heater target driver is not registered")
+    if _vsp_driver is not None and _vsp_driver.is_menu_busy():
+        raise RuntimeError("heater target write is blocked while a VSP menu operation is active")
+    if not _heater_targets.is_busy() and _automation is not None and _automation.hardware_busy():
+        raise RuntimeError("heater target write is blocked while another LCD menu operation is active")
+    return _heater_targets.request_set(body, target_f)
 
 def get_automation_status() -> dict:
     if _automation is None:
@@ -125,6 +154,10 @@ def _web_control_lock(equipment: dict, vsp: dict, automation: dict) -> tuple[boo
     if clock_sync.get("busy"):
         return True, "Synchronizing the PL-PLUS clock"
 
+    heater_targets = get_heater_target_status()
+    if heater_targets.get("busy"):
+        return True, "Reading or setting PL-PLUS heater targets"
+
     vsp_phase = str(vsp.get("phase") or "")
     if vsp.get("busy") and vsp_phase != "holding":
         label = vsp_phase.replace("_", " ") or "pump speed control"
@@ -144,6 +177,7 @@ def get_equipment_status() -> dict:
         **equipment,
         "vsp": vsp,
         "automation": automation,
+        "heater_targets": get_heater_target_status(),
         "controls_locked": controls_locked,
         "control_lock_reason": control_lock_reason,
     }
@@ -156,6 +190,8 @@ def set_equipment_switch(control: str, enabled: bool) -> dict:
             return _automation.set_pool_heat(enabled)
         field = "filter_on" if control == "filter" else control
         return _automation.set_manual(**{field: enabled})
+    if _heater_targets is not None and _heater_targets.is_busy():
+        raise RuntimeError("equipment control is blocked while a heater target menu operation is active")
     if _vsp_driver is not None and _vsp_driver.is_busy():
         raise RuntimeError("equipment control is blocked while a VSP menu operation is active")
     return _equipment.set_switch(control, enabled)
@@ -165,6 +201,8 @@ def request_equipment_mode(mode: str) -> dict:
         raise RuntimeError("equipment controller is not registered")
     if _automation is not None and _automation.is_enabled():
         return _automation.set_manual(mode=mode)
+    if _heater_targets is not None and _heater_targets.is_busy():
+        raise RuntimeError("mode control is blocked while a heater target menu operation is active")
     if _vsp_driver is not None and _vsp_driver.is_busy():
         raise RuntimeError("mode control is blocked while a VSP menu operation is active")
     return _equipment.request_mode(mode)
@@ -179,6 +217,8 @@ def request_vsp_preset(preset: str, lease_seconds: Optional[float] = None) -> di
         raise RuntimeError("VSP driver is not registered")
     if _automation is not None and _automation.is_enabled():
         return _automation.set_manual(pump_preset=preset)
+    if _heater_targets is not None and _heater_targets.is_busy():
+        raise RuntimeError("pump speed control is blocked while a heater target menu operation is active")
     return _vsp_driver.request_preset(preset, source="manual", lease_seconds=lease_seconds)
 
 def clear_vsp_target() -> dict:
@@ -271,6 +311,9 @@ def enqueue_key(name: str) -> bool:
     k = (name or "").strip().lower()
     if _vsp_driver is not None and _vsp_driver.is_menu_busy():
         logger.info("controls: key '%s' blocked while VSP menu operation is active", k)
+        return False
+    if _heater_targets is not None and _heater_targets.is_busy():
+        logger.info("controls: key '%s' blocked while a heater target menu operation is active", k)
         return False
     if _automation is not None and _automation.hardware_busy():
         logger.info("controls: key '%s' blocked while clock synchronization is active", k)

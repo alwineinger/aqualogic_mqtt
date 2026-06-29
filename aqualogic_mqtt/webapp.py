@@ -8,6 +8,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from . import controls
 from .vsp import VspBusyError, VspDisabledError, VspInterlockError
 from .equipment import EquipmentBusyError, EquipmentError
+from .heater_targets import HeaterTargetBusyError, HeaterTargetError
 
 def _basic_auth(user: str | None, pw: str | None):
     if not user or not pw:
@@ -86,6 +87,22 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
     @require_auth
     def api_equipment_status():
         return jsonify(controls.get_equipment_status())
+
+    @app.get("/api/heater-targets")
+    @require_auth
+    def api_heater_targets():
+        return jsonify(controls.get_heater_target_status())
+
+    @app.post("/api/heater-targets/refresh")
+    @require_auth
+    def api_heater_targets_refresh():
+        try:
+            status = controls.refresh_heater_targets()
+        except HeaterTargetBusyError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+        except (HeaterTargetError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({"ok": True, "status": status}), 202
 
     @app.get("/api/automation")
     @require_auth
@@ -212,6 +229,22 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
             return jsonify({"ok": False, "error": str(exc)}), 400
         except (VspBusyError, VspDisabledError, VspInterlockError, RuntimeError) as exc:
             return jsonify({"ok": False, "error": str(exc)}), 409
+        return jsonify({"ok": True, "status": status}), 202
+
+    @app.post("/api/control/temperature")
+    @require_auth
+    def api_control_temperature():
+        body = request.get_json(silent=True) or {}
+        if "body" not in body or "target_f" not in body:
+            return jsonify({"ok": False, "error": "JSON fields 'body' and 'target_f' are required"}), 400
+        try:
+            status = controls.set_heater_target(body.get("body"), body.get("target_f"))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except HeaterTargetBusyError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+        except (HeaterTargetError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
         return jsonify({"ok": True, "status": status}), 202
 
     @app.post("/api/key/<keyname>")

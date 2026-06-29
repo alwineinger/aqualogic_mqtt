@@ -23,6 +23,7 @@ from .vsp import PanelPumpState, VspDriver
 from .equipment import EquipmentController
 from .automation import AutomationEngine
 from .clock_sync import ClockSyncDriver
+from .heater_targets import HeaterTargetDriver
 
 logger = logging.getLogger("aqualogic_mqtt.client")
 
@@ -75,6 +76,12 @@ class Client:
             menu_cache_reader=controls.get_default_menu,
             state_file=clock_sync_state_file,
         )
+        self._heater_targets = HeaterTargetDriver(
+            self._panel,
+            key_sender=self._panel.send_key,
+            display_reader=controls.get_display,
+        )
+        controls.set_heater_target_driver(self._heater_targets)
         self._automation = AutomationEngine(
             self._equipment,
             self._vsp_driver,
@@ -82,6 +89,7 @@ class Client:
             enable_file=automation_enable_file,
             state_file=automation_state_file,
             clock_sync=self._clock_sync,
+            heater_targets=self._heater_targets,
         )
         controls.set_automation_engine(self._automation)
 

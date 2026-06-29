@@ -177,5 +177,6 @@ venv-pool/
 .automation-control-enabled
 .automation-state.json
 .clock-sync-state.json
+.heater-target-state.json
 .vsp-rollback.json.tmp
 aqualogic_mqtt.err

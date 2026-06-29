@@ -18,6 +18,29 @@ class WebApiContractTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["mode"], "pool")
 
+    @patch("aqualogic_mqtt.webapp.controls.get_heater_target_status")
+    def test_heater_target_query_contract(self, status):
+        status.return_value = {"available": True, "targets": {"pool": 85, "spa": 102}}
+        response = self.client.get("/api/heater-targets")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["targets"]["spa"], 102)
+
+    @patch("aqualogic_mqtt.webapp.controls.set_heater_target")
+    def test_heater_target_set_contract(self, set_target):
+        set_target.return_value = {"phase": "queued", "target_body": "spa", "target_f": 103}
+        response = self.client.post(
+            "/api/control/temperature", json={"body": "spa", "target_f": 103}
+        )
+        self.assertEqual(response.status_code, 202)
+        set_target.assert_called_once_with("spa", 103)
+
+    @patch("aqualogic_mqtt.webapp.controls.refresh_heater_targets")
+    def test_heater_target_refresh_contract(self, refresh):
+        refresh.return_value = {"phase": "queued"}
+        response = self.client.post("/api/heater-targets/refresh")
+        self.assertEqual(response.status_code, 202)
+        refresh.assert_called_once_with()
+
     @patch("aqualogic_mqtt.webapp.controls.set_manual_override")
     def test_manual_override_api(self, set_manual):
         set_manual.return_value = {"desired": {"source": "manual"}}
@@ -36,11 +59,16 @@ class WebApiContractTest(unittest.TestCase):
             'data-mode="spillover"',
             'data-speed="speed1"',
             'data-speed="speed4"',
+            'data-pump-on="true"',
+            '>Pump On</button>',
             'data-switch="auto_heat"',
             'data-switch="heater_relay"',
             'data-switch="lights"',
             'data-switch="blower"',
             '>Auto Heat</button>',
+            'data-temperature-body="pool"',
+            'data-temperature-body="spa"',
+            'data-temperature-confirm="true"',
         ):
             self.assertIn(marker, html)
         response.close()
@@ -91,7 +119,7 @@ class WebApiContractTest(unittest.TestCase):
         response = create_app(static_dir=static_dir).test_client().get("/")
         html = response.get_data(as_text=True)
         self.assertIn("const automationEnabled = state.automation?.enabled === true", html)
-        self.assertIn("const localMenuPending = pendingControl?.kind === 'speed'", html)
+        self.assertIn("['speed', 'temperature', 'temperature-refresh'].includes", html)
         self.assertIn("controlsLocked = state.controls_locked === true || localMenuPending", html)
         self.assertIn("Direct mode/equipment commands keep only their selected button pending", html)
         self.assertIn("state.automation?.pool_heat_enabled === true", html)

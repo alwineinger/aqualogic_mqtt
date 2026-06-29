@@ -189,6 +189,17 @@ class FakeClockSync:
         return {"phase": "checked", "due": False}
 
 
+class FakeHeaterTargets:
+    def __init__(self, busy=False):
+        self.busy = busy
+
+    def is_busy(self):
+        return self.busy
+
+    def status(self):
+        return {"busy": self.busy, "phase": "reading" if self.busy else "complete"}
+
+
 class AutomationEngineTest(unittest.TestCase):
     def make_engine(self, now, **kwargs):
         equipment = FakeEquipment()
@@ -214,6 +225,17 @@ class AutomationEngineTest(unittest.TestCase):
         now = ["2026-06-27T12:00:00Z"]
         engine, _equipment, _vsp = self.make_engine(now, clock_sync=FakeClockSync())
         self.assertEqual(engine.status()["clock_sync"], {"phase": "checked", "due": False})
+
+    def test_heater_target_menu_work_pauses_automation(self):
+        targets = FakeHeaterTargets(busy=True)
+        engine, equipment, vsp = self.make_engine(
+            ["2026-06-27T12:00:00Z"], heater_targets=targets
+        )
+        self.assertTrue(engine.hardware_busy())
+        self.assertFalse(engine.tick())
+        self.assertEqual(engine.status()["phase"], "heater_target")
+        self.assertEqual(equipment.calls, [])
+        self.assertEqual(vsp.calls, [])
 
     def test_service_mode_is_global_inhibit(self):
         engine, equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
