@@ -289,6 +289,11 @@ issuing another mode or Filter command.
 Manual web/API changes become 12-hour persisted overrides whenever automation
 is enabled, except Pool Heat. Pool Heat is a durable preference that remains
 enabled until explicitly turned off and is restored after a Spa session.
+At 01:00 America/New_York each day, the host releases the entire timed manual
+override and resumes the next applicable priority source. This checkpoint is
+persisted by local calendar date, runs once through the repeated fall-DST hour,
+and catches up after a service outage. It does not clear an active OpenClaw Spa
+session or the durable Pool Heat preference.
 Inspect the complete resolved state, local/UTC conversion, clock sync status,
 and active priority source at `/api/automation`.
 `/api/equipment` reports the PL-PLUS mode, equipment outputs, and the live

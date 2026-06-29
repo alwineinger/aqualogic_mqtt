@@ -462,6 +462,89 @@ class AutomationEngineTest(unittest.TestCase):
             self.assertEqual(status["manual_override"]["expires_utc"], "2026-06-28T01:30:00Z")
             self.assertEqual(status["desired"]["pump_preset"], "speed3")
 
+    def test_all_manual_overrides_release_once_at_one_am_new_york(self):
+        now = ["2026-06-27T04:59:00Z"]  # 00:59 EDT
+        engine, _equipment, _vsp = self.make_engine(now)
+        engine.set_manual(mode="pool", lights=True, blower=True, filter_on=False)
+        engine.set_pool_heat(True)
+
+        engine.tick()
+        self.assertIsNotNone(engine.status()["manual_override"])
+
+        now[0] = "2026-06-27T05:00:00Z"  # 01:00 EDT
+        engine.tick()
+        status = engine.status()
+        self.assertIsNone(status["manual_override"])
+        self.assertTrue(status["pool_heat_enabled"])
+        self.assertEqual(status["last_manual_release_local_date"], "2026-06-27")
+        self.assertEqual(status["manual_release_time_local"], "01:00:00")
+
+        # A new override after the daily checkpoint survives until tomorrow.
+        now[0] = "2026-06-27T05:30:00Z"
+        engine.set_manual(blower=True)
+        engine.tick()
+        self.assertTrue(engine.status()["manual_override"]["blower"])
+
+    def test_repeated_fall_dst_one_am_does_not_release_twice(self):
+        now = ["2026-11-01T04:59:00Z"]  # 00:59 EDT
+        engine, _equipment, _vsp = self.make_engine(now)
+        engine.set_manual(lights=True)
+
+        now[0] = "2026-11-01T05:00:00Z"  # first 01:00, EDT
+        engine.tick()
+        self.assertIsNone(engine.status()["manual_override"])
+
+        now[0] = "2026-11-01T05:30:00Z"
+        engine.set_manual(lights=True)
+        now[0] = "2026-11-01T06:30:00Z"  # repeated 01:30, EST
+        engine.tick()
+        self.assertTrue(engine.status()["manual_override"]["lights"])
+
+    def test_restart_after_missed_one_am_catches_up(self):
+        now = ["2026-06-27T12:00:00Z"]  # 08:00 EDT
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = os.path.join(directory, "automation.json")
+            with open(state_file, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "version": 3,
+                    "manual_override": {
+                        "expires_utc": "2026-06-27T20:00:00Z",
+                        "lights": True,
+                    },
+                    "pool_heat_enabled": False,
+                    "openclaw_spa_session": None,
+                    "last_manual_release_local_date": "2026-06-26",
+                }, handle)
+            engine, _equipment, _vsp = self.make_engine(now, state_file=state_file)
+            self.assertIsNotNone(engine.status()["manual_override"])
+            engine.tick()
+            self.assertIsNone(engine.status()["manual_override"])
+            with open(state_file, encoding="utf-8") as handle:
+                saved = json.load(handle)
+            self.assertEqual(saved["last_manual_release_local_date"], "2026-06-27")
+
+    def test_legacy_state_migration_does_not_clear_at_deploy_time(self):
+        now = ["2026-06-27T20:00:00Z"]  # 16:00 EDT
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = os.path.join(directory, "automation.json")
+            with open(state_file, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "version": 2,
+                    "manual_override": {
+                        "expires_utc": "2026-06-28T01:00:00Z",
+                        "lights": True,
+                    },
+                    "pool_heat_enabled": False,
+                    "openclaw_spa_session": None,
+                }, handle)
+            engine, _equipment, _vsp = self.make_engine(now, state_file=state_file)
+            engine.tick()
+            self.assertTrue(engine.status()["manual_override"]["lights"])
+            with open(state_file, encoding="utf-8") as handle:
+                migrated = json.load(handle)
+            self.assertEqual(migrated["version"], 3)
+            self.assertEqual(migrated["last_manual_release_local_date"], "2026-06-27")
+
     def test_pool_heat_is_persistent_and_does_not_create_or_extend_manual_override(self):
         now = ["2026-06-27T16:00:00Z"]
         with tempfile.TemporaryDirectory() as directory:

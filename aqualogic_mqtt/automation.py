@@ -7,7 +7,7 @@ America/New_York so the intended wall-clock behavior survives DST changes.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import json
 import os
 from threading import Lock
@@ -257,7 +257,15 @@ class AutomationEngine:
         self._last_error: Optional[str] = None
         self._last_tick_utc: Optional[datetime] = None
         self._desired: Optional[DesiredState] = None
+        self._last_manual_release_local_date = self._initial_manual_release_date()
         self._load()
+
+    def _initial_manual_release_date(self) -> date:
+        """Migration-safe baseline that never clears an override at upgrade time."""
+        local_now = parse_utc(self._now()).astimezone(self._resolver.timezone)
+        if local_now.timetz().replace(tzinfo=None) >= time(1, 0):
+            return local_now.date()
+        return local_now.date() - timedelta(days=1)
 
     def is_enabled(self) -> bool:
         return self._enabled or bool(self._enable_file and os.path.isfile(self._enable_file))
@@ -312,6 +320,14 @@ class AutomationEngine:
                 else None
             )
             openclaw_spa = payload.get("openclaw_spa_session")
+            saved_release_date = payload.get("last_manual_release_local_date")
+            if saved_release_date is not None:
+                parsed_release_date = date.fromisoformat(str(saved_release_date))
+            else:
+                # Existing state files predate the daily-release feature. Mark
+                # today's checkpoint complete rather than unexpectedly
+                # clearing a live override during deployment.
+                parsed_release_date = self._initial_manual_release_date()
             if openclaw_spa:
                 raw_openclaw_spa = dict(openclaw_spa)
                 phase = str(openclaw_spa.get("phase") or "spa")
@@ -339,6 +355,9 @@ class AutomationEngine:
                 self._manual_override = manual
                 self._openclaw_spa_session = openclaw_spa
                 self._pool_heat_enabled = saved_pool_heat
+                self._last_manual_release_local_date = parsed_release_date
+                if saved_release_date is None:
+                    self._save_locked()
         except Exception as exc:
             self._last_error = f"automation state load failed: {exc}"
 
@@ -346,13 +365,14 @@ class AutomationEngine:
         if not self._state_file:
             return
         payload = {
-            "version": 2,
+            "version": 3,
             "updated_at_utc": format_utc(self._now()),
             "pool_heat_enabled": self._pool_heat_enabled,
             "manual_override": (
                 self._manual_dict(self._manual_override) if self._manual_override is not None else None
             ),
             "openclaw_spa_session": self._openclaw_spa_session,
+            "last_manual_release_local_date": self._last_manual_release_local_date.isoformat(),
         }
         parent = os.path.dirname(os.path.abspath(self._state_file))
         os.makedirs(parent, exist_ok=True)
@@ -496,6 +516,19 @@ class AutomationEngine:
                 self._pool_heat_enabled,
             )
 
+    def _release_manual_for_daily_checkpoint(self, now: datetime) -> bool:
+        local_now = parse_utc(now).astimezone(self._resolver.timezone)
+        if local_now.timetz().replace(tzinfo=None) < time(1, 0):
+            return False
+        with self._lock:
+            if self._last_manual_release_local_date >= local_now.date():
+                return False
+            released = self._manual_override is not None
+            self._manual_override = None
+            self._last_manual_release_local_date = local_now.date()
+            self._save_locked()
+            return released
+
     def status(self) -> dict:
         now = parse_utc(self._now())
         manual, openclaw_spa, pool_heat_enabled = self._inputs()
@@ -509,6 +542,7 @@ class AutomationEngine:
             phase = self._phase
             last_error = self._last_error
             last_tick = self._last_tick_utc
+            last_manual_release_local_date = self._last_manual_release_local_date
         result = {
             "available": True,
             "enabled": self.is_enabled(),
@@ -525,6 +559,8 @@ class AutomationEngine:
             "manual_override": self._manual_dict(manual) if manual is not None else None,
             "openclaw_spa_session": openclaw_spa,
             "pool_heat_enabled": pool_heat_enabled,
+            "manual_release_time_local": "01:00:00",
+            "last_manual_release_local_date": last_manual_release_local_date.isoformat(),
         }
         if self._clock_sync is not None:
             result["clock_sync"] = self._clock_sync.status()
@@ -537,6 +573,7 @@ class AutomationEngine:
             return False
         try:
             now = parse_utc(self._now())
+            self._release_manual_for_daily_checkpoint(now)
             manual, openclaw_spa, pool_heat_enabled = self._inputs()
             desired = self._resolver.resolve(
                 now,
