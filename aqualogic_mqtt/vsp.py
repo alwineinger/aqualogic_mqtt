@@ -254,8 +254,49 @@ class VspDriver:
                 worker.start()
         return self.status()
 
+    def adopt_observed_preset(self, preset: str, *, source: str = "schedule") -> dict:
+        """Record an already-satisfied target without opening the PL-PLUS menu."""
+        del source  # retained alongside request_preset for caller diagnostics/API symmetry
+        name = _canonical_preset(preset)
+        if name not in PRESET_SPEEDS:
+            raise ValueError("pump preset must be Speed 1, Speed 2, Speed 3, or Speed 4")
+        with self._lock:
+            now = self._clock()
+            self._assert_interlocks_locked(now)
+            if self._worker is not None and self._worker.is_alive():
+                raise VspBusyError("a VSP menu operation is already active")
+            if self._rollback_pending():
+                raise VspBusyError("a persisted VSP rollback must complete before adopting observed speed")
+            target_pct = PRESET_SPEEDS[name]
+            if self._state.requested_speed_pct != target_pct:
+                raise VspInterlockError(
+                    f"observed pump request is {self._state.requested_speed_pct!r}%, not {target_pct}%"
+                )
+            self._operation_id = None
+            self._phase = "observed"
+            self._target_name = name
+            self._target_pct = target_pct
+            self._edited_preset = None
+            self._original_pct = None
+            self._lease_expires_at = None
+            self._last_error = None
+            self._cancel.clear()
+        return self.status()
+
     def clear_target(self) -> dict:
-        self._cancel.set()
+        with self._lock:
+            active = self._worker is not None and self._worker.is_alive()
+            if not active and self._phase == "observed":
+                self._phase = "idle"
+                self._target_pct = None
+                self._target_name = None
+                self._edited_preset = None
+                self._original_pct = None
+                self._lease_expires_at = None
+                self._last_error = None
+                self._cancel.clear()
+            else:
+                self._cancel.set()
         return self.status()
 
     def tick(self) -> bool:
@@ -659,6 +700,6 @@ class VspDriver:
                 "filter_on": self._state.filter_on,
                 "service_mode": self._state.service_mode,
                 "hardware_priming": hardware_priming,
-                "verified": self._phase == "holding" and self._state.requested_speed_pct == self._target_pct,
+                "verified": self._phase in ("holding", "observed") and self._state.requested_speed_pct == self._target_pct,
                 "last_error": self._last_error,
             }

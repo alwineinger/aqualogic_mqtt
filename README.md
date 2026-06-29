@@ -229,6 +229,11 @@ curl -X DELETE http://10.40.1.61:8089/api/vsp/speed
 Safety behavior:
 
 - Requests are rejected while the Filter LED is off or Service mode is on.
+- On service startup, a scheduled percentage already reported by PL-PLUS is
+  adopted in memory without opening the Settings menu. Continued observation
+  still invokes the VSP driver if that request later drifts from schedule. If
+  the initial speed has not arrived yet, automation waits rather than treating
+  an unknown value as a mismatch.
 - The host never starts or estimates a priming interval. When PL-PLUS reports
   `Prime`, `Priming`, or `Start Delay` on its live display/default-menu state,
   automation pauses all reconciliation and resumes after that hardware-owned

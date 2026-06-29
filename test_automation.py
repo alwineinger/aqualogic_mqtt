@@ -131,6 +131,8 @@ class FakeVsp:
             "busy": False,
             "phase": "idle",
             "target_name": None,
+            "requested_speed_pct": 0,
+            "verified": False,
             "lease_remaining_sec": None,
             "rollback_pending": False,
             "hardware_priming": False,
@@ -147,11 +149,27 @@ class FakeVsp:
             "phase": "holding",
             "target_name": target,
             "lease_remaining_sec": kwargs.get("lease_seconds"),
+            "verified": True,
+        })
+
+    def adopt_observed_preset(self, target, **kwargs):
+        self.calls.append(("adopt", target, kwargs.get("source")))
+        expected = {"speed1": 70, "speed2": 95, "speed3": 55, "speed4": 40}[target]
+        self.state.update({
+            "busy": False,
+            "phase": "observed",
+            "target_name": target,
+            "verified": self.state.get("requested_speed_pct") == expected,
         })
 
     def clear_target(self):
         self.calls.append(("clear",))
-        self.state.update({"busy": False, "phase": "complete", "target_name": None})
+        self.state.update({
+            "busy": False,
+            "phase": "complete",
+            "target_name": None,
+            "verified": False,
+        })
 
 
 class FakeClockSync:
@@ -203,6 +221,38 @@ class AutomationEngineTest(unittest.TestCase):
         self.assertTrue(engine.tick())
         self.assertEqual(vsp.calls, [("speed", "speed1", "schedule")])
         vsp.state["lease_remaining_sec"] = 30
+        self.assertTrue(engine.tick())
+        self.assertEqual(vsp.calls[-1], ("speed", "speed1", "schedule"))
+
+    def test_matching_observed_schedule_speed_is_adopted_without_menu_control(self):
+        engine, _equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
+        vsp.state["requested_speed_pct"] = 70
+
+        self.assertFalse(engine.tick())
+        self.assertEqual(vsp.calls, [("adopt", "speed1", "schedule")])
+        self.assertEqual(vsp.state["phase"], "observed")
+        self.assertEqual(vsp.state["target_name"], "speed1")
+        self.assertTrue(vsp.state["verified"])
+        self.assertEqual(engine.status()["phase"], "observed_speed")
+
+    def test_startup_waits_for_initial_speed_observation_before_using_menu(self):
+        engine, _equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
+        vsp.state["requested_speed_pct"] = None
+
+        self.assertFalse(engine.tick())
+        self.assertEqual(vsp.calls, [])
+        self.assertEqual(engine.status()["phase"], "waiting_for_speed_observation")
+
+        vsp.state["requested_speed_pct"] = 70
+        self.assertFalse(engine.tick())
+        self.assertEqual(vsp.calls, [("adopt", "speed1", "schedule")])
+
+    def test_adopted_schedule_speed_uses_driver_if_observed_request_drifts(self):
+        engine, _equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
+        vsp.state["requested_speed_pct"] = 70
+        self.assertFalse(engine.tick())
+
+        vsp.state.update({"requested_speed_pct": 55, "verified": False})
         self.assertTrue(engine.tick())
         self.assertEqual(vsp.calls[-1], ("speed", "speed1", "schedule"))
 

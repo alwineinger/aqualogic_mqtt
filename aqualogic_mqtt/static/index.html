@@ -315,14 +315,16 @@
     }
     if (command.kind === 'speed') {
       const phase = state.vsp?.phase;
+      const speedConfirmed = phase === 'holding'
+        || (phase === 'observed' && state.vsp?.verified === true);
       if (command.target != null) {
-        return state.vsp?.target_name === command.target && phase === 'holding';
+        return state.vsp?.target_name === command.target && speedConfirmed;
       }
       const manualSpeed = state.automation?.manual_override?.pump_preset;
       const scheduledTarget = state.automation?.desired?.pump_preset;
       return !manualSpeed && scheduledTarget != null
         && state.vsp?.target_name === scheduledTarget
-        && phase === 'holding';
+        && speedConfirmed;
     }
     return false;
   }
