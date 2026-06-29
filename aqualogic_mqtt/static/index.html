@@ -486,9 +486,10 @@
     const release = document.querySelector('button[data-speed-clear]');
     const manualSpeed = state.automation?.manual_override?.pump_preset;
     const releasePending = localSpeedPending !== null && localSpeedPending.target == null;
-    const scheduleActive = automationEnabled ? !manualSpeed : !state.vsp?.busy;
     setButtonState(release, {
-      active: !speedGroupPending && scheduleActive,
+      // Resume Schedule is an action, not a selectable operating state.
+      // Show only its temporary pending state, then return it to neutral.
+      active: false,
       pending: releasePending,
     });
     release.disabled = blocked || (!state.vsp?.busy && !manualSpeed);

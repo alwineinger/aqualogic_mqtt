@@ -115,6 +115,8 @@ class WebApiContractTest(unittest.TestCase):
             "function commandCompleted(state, command)",
             "active: modePending == null && btn.dataset.mode === state.mode",
             "active: !speedGroupPending && btn.dataset.speed === state.vsp?.target_name",
+            "Resume Schedule is an action, not a selectable operating state",
+            "active: false",
             "setButtonState(btn, {active: !switchPending && active, pending: switchPending})",
             "pendingControl?.token === commandToken",
             "Command in progress — controls temporarily locked",

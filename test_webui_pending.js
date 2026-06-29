@@ -156,7 +156,8 @@ expectButton(speedButtons[1], {active: false, pending: false, disabled: true});
 expectButton(releaseButton, {active: false, pending: true, disabled: true});
 render(state({mode: 'spa'}));
 expectButton(speedButtons[0], {active: true, pending: false, disabled: false});
-expectButton(releaseButton, {active: true, pending: false, disabled: false});
+expectButton(releaseButton, {active: false, pending: false, disabled: false});
+assert.strictEqual(releaseButton.attributes['aria-pressed'], 'false');
 
 setPending({kind: 'switch', control: 'lights', target: true, accepted: true, startedAt: Date.now()});
 render(state({mode: 'spa'}));
