@@ -31,6 +31,8 @@ class FakePanel:
             line = "Default Menu"
         elif self.page == "settings":
             line = "Settings Menu"
+        elif self.page in ("timers", "diagnostic", "configuration"):
+            line = f"{self.page.title()} Menu"
         else:
             value = self.targets[self.page]
             line = f"{self.page.title()} Heater1 {value}°F" if value is not None else f"{self.page.title()} Heater1 Off"
@@ -39,7 +41,11 @@ class FakePanel:
     def send_key(self, key):
         self.keys.append(key)
         if key == Keys.MENU:
-            self.page = "settings" if self.page in ("pool", "spa", "default") else "default"
+            top = ["settings", "timers", "diagnostic", "configuration", "default"]
+            if self.page in top:
+                self.page = top[(top.index(self.page) + 1) % len(top)]
+            else:
+                self.page = "timers"
         elif key == Keys.RIGHT and self.page == "settings":
             self.page = "spa"
         elif key == Keys.RIGHT and self.page == "spa":
@@ -104,6 +110,16 @@ class HeaterTargetDriverTest(unittest.TestCase):
         self.assertEqual(status["targets"], {"pool": 85, "spa": 102})
         self.assertNotIn(Keys.PLUS, panel.keys)
         self.assertNotIn(Keys.MINUS, panel.keys)
+        self.assertEqual(panel.page, "default")
+
+    def test_refresh_recovers_from_an_arbitrary_top_level_menu(self):
+        panel = FakePanel()
+        panel.page = "timers"
+        driver = self.make_driver(panel, state_file=None)
+        driver.request_refresh()
+        status = wait_complete(driver)
+        self.assertEqual(status["phase"], "complete")
+        self.assertEqual(status["targets"], {"pool": 85, "spa": 102})
         self.assertEqual(panel.page, "default")
 
     def test_set_updates_only_requested_target_and_persists_cache(self):

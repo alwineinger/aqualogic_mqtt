@@ -226,8 +226,11 @@ class HeaterTargetDriver:
         for _ in range(7):
             if _page(self._line()) == "settings":
                 break
-            previous = _page(self._line())
-            self._press(Keys.MENU, lambda line, old=previous: _page(line) != old)
+            previous = _normalize(self._line()).lower()
+            self._press(
+                Keys.MENU,
+                lambda line, old=previous: _normalize(line).lower() != old,
+            )
         else:
             raise HeaterTargetError("could not reach Settings Menu")
         for _ in range(5):
@@ -272,10 +275,10 @@ class HeaterTargetDriver:
             self._assert_available()
             if _page(self._line()) == "default":
                 return
-            previous = _page(self._line())
+            previous = _normalize(self._line()).lower()
             self._key_sender(Keys.MENU)
             try:
-                self._wait_for(lambda line, old=previous: _page(line) != old)
+                self._wait_for(lambda line, old=previous: _normalize(line).lower() != old)
             except HeaterTargetError:
                 pass
 
