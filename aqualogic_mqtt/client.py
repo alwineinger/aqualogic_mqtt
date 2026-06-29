@@ -64,7 +64,10 @@ class Client:
             menu_cache_reader=controls.get_default_menu,
         )
         controls.set_vsp_driver(self._vsp_driver)
-        self._equipment = EquipmentController(self._panel)
+        self._equipment = EquipmentController(
+            self._panel,
+            menu_cache_reader=controls.get_default_menu,
+        )
         controls.set_equipment_controller(self._equipment)
         self._clock_sync = ClockSyncDriver(
             key_sender=self._panel.send_key,

@@ -104,6 +104,7 @@ class FakeEquipment:
             "filter_on": True,
             "busy": False,
             "auto_heat": False,
+            "auto_heat_confirmed": True,
             "heater_relay": False,
             "lights": False,
             "blower": False,
@@ -239,6 +240,28 @@ class AutomationEngineTest(unittest.TestCase):
         self.assertEqual(vsp.state["target_name"], "speed1")
         self.assertTrue(vsp.state["verified"])
         self.assertEqual(engine.status()["phase"], "observed_speed")
+
+    def test_unconfirmed_startup_auto_heat_assumption_never_sends_a_command(self):
+        engine, equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
+        equipment.state.update({"auto_heat": True, "auto_heat_confirmed": False})
+        vsp.state["requested_speed_pct"] = 70
+
+        self.assertFalse(engine.tick())
+        self.assertEqual(equipment.calls, [])
+        self.assertEqual(vsp.calls, [("adopt", "speed1", "schedule")])
+
+    def test_auto_heat_retry_waits_for_new_authoritative_observation(self):
+        engine, equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
+        equipment.state.update({
+            "auto_heat": True,
+            "auto_heat_confirmed": True,
+            "switch_retry_block": {"control": "auto_heat", "target": False},
+        })
+        vsp.state["requested_speed_pct"] = 70
+
+        self.assertFalse(engine.tick())
+        self.assertEqual(equipment.calls, [])
+        self.assertEqual(vsp.calls, [("adopt", "speed1", "schedule")])
 
     def test_matching_persisted_lease_is_adopted_without_recovery(self):
         engine, _equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])

@@ -707,6 +707,20 @@ class AutomationEngine:
                 return False
 
             for name, target in desired.switches.items():
+                if name == "auto_heat" and not equipment.get("auto_heat_confirmed", True):
+                    # pyAqualogic assumes Auto Heat is on until it has parsed
+                    # a Heater1 display page. Never turn that startup default
+                    # into a real HEATER_1 keypress.
+                    continue
+                retry_block = equipment.get("switch_retry_block") or {}
+                if (
+                    name == "auto_heat"
+                    and retry_block.get("control") == name
+                    and retry_block.get("target") == target
+                ):
+                    # Do not repeat a toggle-style heater command until a new
+                    # authoritative Heater1 page has been observed.
+                    continue
                 if equipment.get(name) != target:
                     self._equipment.set_switch(name, target)
                     with self._lock:

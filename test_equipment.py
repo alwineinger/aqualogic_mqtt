@@ -121,6 +121,90 @@ class EquipmentControllerTest(unittest.TestCase):
         panel.states[States.HEATER_1] = True
         self.assertTrue(controller.status()["heater_running"])
 
+    def test_auto_heat_waits_for_authoritative_heater_page(self):
+        panel = FakePanel()
+        panel.states[States.HEATER_AUTO_MODE] = True
+        cache = {"values": {}}
+        controller = EquipmentController(
+            panel,
+            valve_settle_seconds=0,
+            menu_cache_reader=lambda: cache,
+        )
+
+        startup = controller.status()
+        self.assertTrue(startup["auto_heat"])
+        self.assertFalse(startup["auto_heat_confirmed"])
+
+        cache["values"]["heater1Status"] = {
+            "value": "Manual Off", "fresh": True, "observed_at": 1.0,
+        }
+        confirmed = controller.status()
+        self.assertFalse(confirmed["auto_heat"])
+        self.assertTrue(confirmed["auto_heat_confirmed"])
+
+    def test_auto_heat_command_is_not_repeated_while_confirmation_is_pending(self):
+        panel = FakePanel()
+        panel.states[States.HEATER_AUTO_MODE] = True
+        cache = {
+            "values": {
+                "heater1Status": {
+                    "value": "Auto Control", "fresh": True, "observed_at": 1.0,
+                },
+            },
+        }
+        controller = EquipmentController(
+            panel,
+            valve_settle_seconds=0,
+            menu_cache_reader=lambda: cache,
+        )
+
+        first = controller.set_switch("auto_heat", False)
+        second = controller.set_switch("auto_heat", False)
+
+        self.assertEqual(panel.set_calls, [(States.HEATER_AUTO_MODE, False)])
+        self.assertTrue(first["status"]["busy"])
+        self.assertTrue(second["busy"])
+        self.assertFalse(second["auto_heat"])
+
+        cache["values"]["heater1Status"] = {
+            "value": "Manual Off", "fresh": True, "observed_at": 2.0,
+        }
+        settled = controller.status()
+        self.assertFalse(settled["busy"])
+        self.assertIsNone(settled["pending_switch"])
+        self.assertEqual(settled["phase"], "complete")
+
+    def test_auto_heat_timeout_blocks_retry_until_a_new_heater_page(self):
+        now = [0.0]
+        panel = FakePanel()
+        panel.states[States.HEATER_AUTO_MODE] = True
+        cache = {
+            "values": {
+                "heater1Status": {
+                    "value": "Auto Control", "fresh": True, "observed_at": 1.0,
+                },
+            },
+        }
+        controller = EquipmentController(
+            panel,
+            clock=lambda: now[0],
+            switch_confirmation_seconds=2,
+            menu_cache_reader=lambda: cache,
+        )
+
+        controller.set_switch("auto_heat", False)
+        now[0] = 3.0
+        timed_out = controller.status()
+        self.assertEqual(timed_out["switch_retry_block"]["target"], False)
+
+        controller.set_switch("auto_heat", False)
+        self.assertEqual(panel.set_calls, [(States.HEATER_AUTO_MODE, False)])
+
+        cache["values"]["heater1Status"] = {
+            "value": "Auto Control", "fresh": True, "observed_at": 2.0,
+        }
+        self.assertIsNone(controller.status()["switch_retry_block"])
+
     def test_service_mode_blocks_switch(self):
         panel = FakePanel()
         panel.states[States.SERVICE] = True

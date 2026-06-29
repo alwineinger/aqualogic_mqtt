@@ -46,6 +46,8 @@ class EquipmentController:
         mode_selection_interval_seconds: float = 0.75,
         poll_interval_seconds: float = 0.25,
         valve_settle_seconds: float = 35.0,
+        switch_confirmation_seconds: float = 20.0,
+        menu_cache_reader: Optional[Callable[[], dict]] = None,
     ):
         self._panel = panel
         self._clock = clock
@@ -55,6 +57,8 @@ class EquipmentController:
         self._mode_selection_interval_seconds = float(mode_selection_interval_seconds)
         self._poll_interval_seconds = float(poll_interval_seconds)
         self._valve_settle_seconds = float(valve_settle_seconds)
+        self._switch_confirmation_seconds = float(switch_confirmation_seconds)
+        self._menu_cache_reader = menu_cache_reader or (lambda: {})
         self._lock = Lock()
         self._worker: Optional[Thread] = None
         self._operation_id: Optional[str] = None
@@ -62,6 +66,8 @@ class EquipmentController:
         self._target_mode: Optional[str] = None
         self._last_error: Optional[str] = None
         self._last_states: dict[States, bool] = {}
+        self._pending_switch: Optional[dict] = None
+        self._switch_retry_block: Optional[dict] = None
 
     def _read_state(self, state: States) -> tuple[bool, bool]:
         try:
@@ -74,6 +80,25 @@ class EquipmentController:
 
     def _state(self, state: States) -> bool:
         return self._read_state(state)[0]
+
+    def _auto_heat_observation(self) -> tuple[bool, bool, Optional[float]]:
+        """Return Auto Heat only when PL-PLUS has reported the Heater1 page.
+
+        The upstream library initializes this state to True before receiving
+        any Heater1 display update, so its raw value is not authoritative at
+        process startup.
+        """
+        try:
+            item = ((self._menu_cache_reader() or {}).get("values") or {}).get("heater1Status") or {}
+            if item.get("fresh") is not False:
+                value = str(item.get("value") or item.get("display") or "").strip().lower()
+                if value.startswith("auto"):
+                    return True, True, item.get("observed_at")
+                if value.startswith("manual") or value in {"off", "manual off"}:
+                    return False, True, item.get("observed_at")
+        except Exception as exc:
+            logger.debug("transient Heater1 menu-cache read failed: %s", exc)
+        return self._state(States.HEATER_AUTO_MODE), False, None
 
     @staticmethod
     def _mode_from_states(pool: bool, spa: bool, spill: bool) -> str:
@@ -97,7 +122,45 @@ class EquipmentController:
     def status(self) -> dict:
         with self._lock:
             mode = self.mode()
-            busy = self._worker is not None and self._worker.is_alive()
+            now = self._clock()
+            auto_heat, auto_heat_confirmed, auto_heat_observed_at = self._auto_heat_observation()
+            if self._switch_retry_block is not None:
+                blocked_after = self._switch_retry_block.get("after_observed_at")
+                if (
+                    auto_heat_observed_at is not None
+                    and (blocked_after is None or auto_heat_observed_at > blocked_after)
+                ):
+                    self._switch_retry_block = None
+            if self._pending_switch is not None:
+                pending = self._pending_switch
+                pending_name = pending["control"]
+                pending_target = pending["target"]
+                observed = auto_heat if pending_name == "auto_heat" else self._state(SWITCH_STATES[pending_name])
+                if pending_name == "auto_heat":
+                    baseline = pending.get("after_observed_at")
+                    confirmed = (
+                        auto_heat_confirmed
+                        and auto_heat_observed_at is not None
+                        and (baseline is None or auto_heat_observed_at > baseline)
+                    )
+                else:
+                    confirmed = True
+                if confirmed and observed == pending_target:
+                    self._pending_switch = None
+                    self._phase = "complete"
+                    self._last_error = None
+                elif now >= pending["expires_at"]:
+                    self._switch_retry_block = dict(pending)
+                    self._pending_switch = None
+                    self._phase = "confirmation_timeout"
+                    self._last_error = f"timed out confirming {pending_name}={pending_target}"
+                elif pending_name == "auto_heat":
+                    # Preserve the accepted target while awaiting the next
+                    # authoritative Heater1 display page. This prevents the
+                    # upstream startup assumption from triggering key repeats.
+                    auto_heat = pending_target
+            worker_busy = self._worker is not None and self._worker.is_alive()
+            busy = worker_busy or self._pending_switch is not None
             recovered_mode_observation = (
                 mode in MODE_ORDER
                 and not busy
@@ -115,7 +178,8 @@ class EquipmentController:
                 "mode": mode,
                 "service_mode": self._state(States.SERVICE),
                 "filter_on": self._state(States.FILTER),
-                "auto_heat": self._state(States.HEATER_AUTO_MODE),
+                "auto_heat": auto_heat,
+                "auto_heat_confirmed": auto_heat_confirmed,
                 "heater_relay": self._state(States.AUX_2),
                 "heater_running": self._state(States.HEATER_1),
                 "lights": self._state(States.LIGHTS),
@@ -123,6 +187,10 @@ class EquipmentController:
                 "operation_id": self._operation_id,
                 "phase": self._phase,
                 "target_mode": self._target_mode,
+                "pending_switch": dict(self._pending_switch) if self._pending_switch is not None else None,
+                "switch_retry_block": (
+                    dict(self._switch_retry_block) if self._switch_retry_block is not None else None
+                ),
                 "busy": busy,
                 "last_error": self._last_error,
             }
@@ -133,14 +201,47 @@ class EquipmentController:
             raise ValueError(f"unsupported equipment control: {control}")
         if not isinstance(enabled, bool):
             raise ValueError("switch target must be a boolean")
-        if self._state(States.SERVICE):
+        snapshot = self.status()
+        if snapshot.get("service_mode"):
             raise EquipmentError("hardware Service mode is active")
+        retry_block = snapshot.get("switch_retry_block") or {}
+        if retry_block.get("control") == name and retry_block.get("target") == enabled:
+            return snapshot
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                raise EquipmentBusyError("a mode transition is already active")
+            if self._pending_switch is not None:
+                if (
+                    self._pending_switch["control"] == name
+                    and self._pending_switch["target"] == enabled
+                ):
+                    already_pending = True
+                else:
+                    raise EquipmentBusyError("another equipment switch confirmation is pending")
+            else:
+                already_pending = False
+        if already_pending:
+            return self.status()
+        auto_heat_observed_at = None
+        if name == "auto_heat":
+            _value, _confirmed, auto_heat_observed_at = self._auto_heat_observation()
         try:
             accepted = self._panel.set_state(SWITCH_STATES[name], enabled)
         except Exception as exc:
             raise EquipmentError(f"PL-PLUS failed to set {name}={enabled}: {exc}") from exc
         if accepted is False:
             raise EquipmentError(f"PL-PLUS rejected {name}={enabled}")
+        with self._lock:
+            self._operation_id = uuid.uuid4().hex
+            self._phase = f"confirming_{name}"
+            self._target_mode = None
+            self._last_error = None
+            self._pending_switch = {
+                "control": name,
+                "target": enabled,
+                "expires_at": self._clock() + self._switch_confirmation_seconds,
+                "after_observed_at": auto_heat_observed_at,
+            }
         return {"ok": True, "control": name, "target": enabled, "status": self.status()}
 
     def request_mode(self, target: str) -> dict:
@@ -152,6 +253,8 @@ class EquipmentController:
         with self._lock:
             if self._worker is not None and self._worker.is_alive():
                 raise EquipmentBusyError("a mode transition is already active")
+            if self._pending_switch is not None:
+                raise EquipmentBusyError("an equipment switch confirmation is pending")
             self._operation_id = uuid.uuid4().hex
             self._phase = "queued"
             self._target_mode = mode

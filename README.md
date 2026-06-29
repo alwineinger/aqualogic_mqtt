@@ -293,6 +293,11 @@ Inspect the complete resolved state, local/UTC conversion, clock sync status,
 and active priority source at `/api/automation`.
 `/api/equipment` reports the PL-PLUS mode, equipment outputs, and the live
 `heater_running` LED state used by HAL for heating confirmation and health.
+Auto Heat is not reconciled until the PL-PLUS Heater1 display page confirms its
+mode; the upstream library's unconfirmed startup default is never allowed to
+generate a heater keypress. An accepted Auto Heat command is issued once and
+held pending until the Heater1 page confirms it, preventing repeated toggle
+keys.
 
 The WebUI disables its navigation and semantic control buttons while an
 automated hardware operation is actively applying, restoring, transitioning
