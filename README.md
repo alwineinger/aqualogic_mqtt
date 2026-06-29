@@ -283,8 +283,11 @@ separate Spa Speed preset.
 Filter on/off is part of the resolved desired state. Normal schedule,
 cleanout, and calendar Spa sessions require Filter on. A manual Filter-off
 override suppresses speed edits until it expires or is cleared. After every
-Pool/Spa valve key, the host waits 35 seconds for valve motion to settle before
-issuing another mode or Filter command.
+normal mode transition, the host confirms the requested mode and allows 35
+seconds for valve motion to settle before issuing another mode or Filter
+command. Pool→Spillover is the deliberate exception: its two required
+selections are sent 500 ms apart, then only final Spillover is confirmed and
+settled.
 
 Manual web/API changes become 12-hour persisted overrides whenever automation
 is enabled, except Pool Heat. Pool Heat is a durable preference that remains
@@ -325,6 +328,15 @@ curl -X POST http://127.0.0.1:8089/api/control/temperature \
 
 Numeric targets are restricted to the PL-PLUS range of 65–104°F. Hardware
 Service mode and concurrent LCD-menu work inhibit reads and writes.
+Refreshing targets is strictly read-only: it uses only Menu/Right navigation
+and never sends Plus or Minus. The driver changes a target only after an
+explicit confirmed WebUI edit or `POST /api/control/temperature`. A displayed
+`Manual Off` is a heater operating-state observation and must not be described
+as proof that the stored numeric setpoint was erased; use `observed_at_utc` and
+the raw display when diagnosing that case.
+OpenClaw's scheduled-Spa target is separately configured by
+`SPA_TARGET_TEMP_F` (default 102°F); changing the PL-PLUS hardware target does
+not automatically change HAL's planning model.
 
 When a mode, speed, Resume Schedule, or equipment button is clicked, the action
 turns orange immediately and any superseded green selection clears. A pending
@@ -391,3 +403,9 @@ curl -X DELETE http://127.0.0.1:8089/api/openclaw/spa \
 
 Stopping returns to the lower-priority manual/cleanout/schedule state and
 restores the saved Pool Heat preference.
+
+OpenClaw normally updates the calendar event twice: when planned preheat/ready
+times are first calculated, and when the configured set temperature is first
+confirmed. It may add one exception update for a heating fault or a measured
+rate at least 20% slower than expected. Routine start, active, and completion
+ticks do not rewrite the event.
