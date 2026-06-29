@@ -42,6 +42,8 @@ class EquipmentController:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         mode_timeout_seconds: float = 60.0,
+        spillover_timeout_seconds: float = 15.0,
+        mode_selection_interval_seconds: float = 0.75,
         poll_interval_seconds: float = 0.25,
         valve_settle_seconds: float = 35.0,
     ):
@@ -49,6 +51,8 @@ class EquipmentController:
         self._clock = clock
         self._sleep = sleep
         self._mode_timeout_seconds = float(mode_timeout_seconds)
+        self._spillover_timeout_seconds = float(spillover_timeout_seconds)
+        self._mode_selection_interval_seconds = float(mode_selection_interval_seconds)
         self._poll_interval_seconds = float(poll_interval_seconds)
         self._valve_settle_seconds = float(valve_settle_seconds)
         self._lock = Lock()
@@ -157,8 +161,9 @@ class EquipmentController:
             worker.start()
         return self.status()
 
-    def _wait_mode(self, expected: str) -> None:
-        deadline = self._clock() + self._mode_timeout_seconds
+    def _wait_mode(self, expected: str, *, timeout_seconds: Optional[float] = None) -> None:
+        timeout = self._mode_timeout_seconds if timeout_seconds is None else float(timeout_seconds)
+        deadline = self._clock() + timeout
         stable_reads = 0
         while self._clock() < deadline:
             if self._state(States.SERVICE):
@@ -202,15 +207,20 @@ class EquipmentController:
             current = self._wait_current_mode()
 
             # Pool -> Spillover requires two successive POOL/SPA selections on
-            # this controller. Send the pair without waiting for Spa to settle
-            # so Spa is never treated as an operating phase (which would also
-            # select the hardware Spa pump preset). Confirm and settle only the
-            # requested final Spillover state.
+            # this controller. Space the selections by 750 ms, but do not wait
+            # for or settle in Spa, so Spa is never treated as an operating
+            # phase (which would also select the hardware Spa pump preset).
+            # Confirm and settle only the requested final Spillover state.
             if target == "spillover" and current != target:
                 presses = 2 if current == "pool" else 1
-                for _ in range(presses):
+                for index in range(presses):
                     self._panel.send_key(Keys.POOL_SPA)
-                self._wait_mode("spillover")
+                    if index + 1 < presses:
+                        self._sleep(self._mode_selection_interval_seconds)
+                self._wait_mode(
+                    "spillover",
+                    timeout_seconds=self._spillover_timeout_seconds,
+                )
                 self._settle_valves()
                 with self._lock:
                     self._phase = "complete"

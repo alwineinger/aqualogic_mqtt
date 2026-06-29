@@ -90,6 +90,17 @@ class StartupUnknownPanel(FakePanel):
         self.filter_reads_remaining = 4
 
 
+class MissSecondSelectionPanel(FakePanel):
+    """Apply Pool→Spa, then simulate the second selection being missed."""
+
+    def send_key(self, key):
+        self.key_calls.append(key)
+        if key == Keys.POOL_SPA and len(self.key_calls) == 1:
+            self.states[States.POOL] = False
+            self.states[States.SPA] = True
+            self.states[States.SPILLOVER] = False
+
+
 class EquipmentControllerTest(unittest.TestCase):
     def test_switch_mapping_preserves_aux_assignments(self):
         panel = FakePanel()
@@ -179,7 +190,13 @@ class EquipmentControllerTest(unittest.TestCase):
 
     def test_spillover_from_pool_does_not_wait_in_spa(self):
         panel = RejectIntermediateSpaObservationPanel()
-        controller = EquipmentController(panel, poll_interval_seconds=0.001, valve_settle_seconds=0)
+        sleep_calls = []
+        controller = EquipmentController(
+            panel,
+            sleep=lambda seconds: sleep_calls.append(seconds),
+            poll_interval_seconds=0.001,
+            valve_settle_seconds=0,
+        )
         controller.request_mode("spillover")
         deadline = time.monotonic() + 1
         while controller.status()["busy"] and time.monotonic() < deadline:
@@ -188,6 +205,36 @@ class EquipmentControllerTest(unittest.TestCase):
         self.assertEqual(controller.status()["mode"], "spillover")
         self.assertEqual(panel.key_calls, [Keys.POOL_SPA, Keys.POOL_SPA])
         self.assertEqual(panel.set_calls, [])
+        self.assertEqual(sleep_calls.count(0.75), 1)
+
+    def test_spillover_confirmation_uses_15_second_deadline(self):
+        panel = MissSecondSelectionPanel()
+        elapsed = [0.0]
+
+        def clock():
+            return elapsed[0]
+
+        def sleep(seconds):
+            elapsed[0] += seconds
+
+        controller = EquipmentController(
+            panel,
+            clock=clock,
+            sleep=sleep,
+            mode_timeout_seconds=60,
+            spillover_timeout_seconds=15,
+            poll_interval_seconds=0.25,
+            valve_settle_seconds=0,
+        )
+        controller.request_mode("spillover")
+        deadline = time.monotonic() + 1
+        while controller.status()["busy"] and time.monotonic() < deadline:
+            time.sleep(0.001)
+
+        status = controller.status()
+        self.assertEqual(status["phase"], "failed")
+        self.assertIn("timed out waiting for spillover mode", status["last_error"])
+        self.assertLess(elapsed[0], 20)
 
 
 if __name__ == "__main__":
