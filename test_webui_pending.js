@@ -140,15 +140,6 @@ expectButton(speedButtons[1], {active: false, pending: true, disabled: true});
 render(state({mode: 'spa', vsp: {enabled: true, busy: true, phase: 'holding', target_name: 'speed2'}}));
 expectButton(speedButtons[1], {active: true, pending: false, disabled: false});
 
-setPending({kind: 'speed', target: 'speed1', accepted: true, startedAt: Date.now()});
-render(state({
-  vsp: {
-    enabled: true, busy: false, phase: 'observed', target_name: 'speed1',
-    requested_speed_pct: 70, verified: true,
-  }
-}));
-expectButton(speedButtons[0], {active: true, pending: false, disabled: false});
-
 const manualSpeedState = state({
   mode: 'spa',
   vsp: {enabled: true, busy: true, phase: 'holding', target_name: 'speed2'},

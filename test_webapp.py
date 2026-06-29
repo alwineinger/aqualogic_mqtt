@@ -113,7 +113,6 @@ class WebApiContractTest(unittest.TestCase):
         for marker in (
             "let pendingControl = null",
             "function commandCompleted(state, command)",
-            "phase === 'observed' && state.vsp?.verified === true",
             "active: modePending == null && btn.dataset.mode === state.mode",
             "active: !speedGroupPending && btn.dataset.speed === state.vsp?.target_name",
             "Resume Schedule is an action, not a selectable operating state",

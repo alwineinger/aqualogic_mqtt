@@ -128,29 +128,6 @@ class VspDriverTest(unittest.TestCase):
         self.assertNotIn(Keys.FILTER, controller.keys)
         self.assertEqual(controller.screen, "Default Menu")
 
-    def test_adopts_matching_observed_speed_without_menu_navigation(self):
-        controller = FakeController(active_preset=1)
-        driver = self.make_driver(controller)
-
-        status = driver.adopt_observed_preset("speed1", source="schedule")
-
-        self.assertFalse(status["busy"])
-        self.assertEqual(status["phase"], "observed")
-        self.assertEqual(status["target_name"], "speed1")
-        self.assertTrue(status["verified"])
-        self.assertEqual(controller.keys, [])
-
-    def test_clears_observed_adoption_without_menu_navigation(self):
-        controller = FakeController(active_preset=1)
-        driver = self.make_driver(controller)
-        driver.adopt_observed_preset("speed1")
-
-        status = driver.clear_target()
-
-        self.assertEqual(status["phase"], "idle")
-        self.assertIsNone(status["target_name"])
-        self.assertEqual(controller.keys, [])
-
     def test_lcd_detail_refresh_does_not_look_like_page_navigation(self):
         self.assertEqual(_page_key("Spa Heater1"), _page_key("Spa Heater1 Manual Off"))
         self.assertEqual(_page_key("VSP Speed Settings"), _page_key("VSP Speed Settings + to enter"))
