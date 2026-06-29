@@ -440,11 +440,12 @@
     equipmentState = state;
     reconcilePendingControl(state);
     const automationEnabled = state.automation?.enabled === true;
-    // The backend excludes a scheduled VSP `holding` lease from this flag.
-    // Only active hardware/menu reconciliation locks manual WebUI input.
-    controlsLocked = state.controls_locked === true || pendingControl !== null;
+    // Direct mode/equipment commands keep only their selected button pending.
+    // A speed request locks globally because it must navigate the PL-PLUS LCD.
+    const localMenuPending = pendingControl?.kind === 'speed';
+    controlsLocked = state.controls_locked === true || localMenuPending;
     controlLockEl.hidden = !controlsLocked;
-    controlLockEl.textContent = pendingControl
+    controlLockEl.textContent = localMenuPending
       ? 'Command in progress — controls temporarily locked'
       : `${state.control_lock_reason || 'Automated control in progress'} — controls temporarily locked`;
     panelEl.setAttribute('aria-busy', controlsLocked ? 'true' : 'false');
@@ -460,7 +461,7 @@
         active: modePending == null && btn.dataset.mode === state.mode,
         pending: btn.dataset.mode === modePending,
       });
-      btn.disabled = blocked;
+      btn.disabled = blocked || btn.dataset.mode === modePending;
     });
     document.querySelectorAll('button[data-switch]').forEach(btn => {
       const isPoolHeat = btn.dataset.switch === 'auto_heat' && automationEnabled;
@@ -470,7 +471,7 @@
       const switchPending = pendingControl?.kind === 'switch'
         && pendingControl.control === btn.dataset.switch;
       setButtonState(btn, {active: !switchPending && active, pending: switchPending});
-      btn.disabled = blocked;
+      btn.disabled = blocked || switchPending;
     });
     const localSpeedPending = pendingControl?.kind === 'speed' ? pendingControl : null;
     const backendSpeedPending = state.vsp?.busy && state.vsp?.phase !== 'holding'

@@ -299,16 +299,17 @@ generate a heater keypress. An accepted Auto Heat command is issued once and
 held pending until the Heater1 page confirms it, preventing repeated toggle
 keys.
 
-The WebUI disables its navigation and semantic control buttons while an
-automated hardware operation is actively applying, restoring, transitioning
-modes, synchronizing the clock, or waiting for PL-PLUS priming. A visible
-banner reports the current lock reason. A scheduled VSP lease in the stable
-`holding` phase does not lock the controls.
+The WebUI globally disables navigation and semantic controls only while
+automation owns the PL-PLUS LCD menu, such as active VSP menu work or clock
+synchronization. Direct mode and equipment commands do not globally lock the
+interface. A scheduled VSP lease in the stable `holding` phase also does not
+lock the controls.
 
 When a mode, speed, Resume Schedule, or equipment button is clicked, the action
-turns orange immediately and any superseded green selection clears. Controls
-remain locked until polled hardware state confirms completion. Mode, speed,
-and equipment selections then show their confirmed state in green; Resume
+turns orange immediately and any superseded green selection clears. A pending
+direct command disables only its selected button; speed/menu work retains the
+global lock until completion. Mode, speed, and equipment selections then show
+their confirmed state in green; Resume
 Schedule is momentary and returns to neutral. Failed or timed-out commands
 restore the confirmed hardware presentation instead of leaving a false active
 state.

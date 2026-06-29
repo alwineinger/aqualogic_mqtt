@@ -127,9 +127,10 @@ expectButton(speedButtons[0], {active: true, pending: false, disabled: false});
 
 setPending({kind: 'mode', target: 'spa', accepted: true, startedAt: Date.now()});
 render(state());
-expectButton(modeButtons[0], {active: false, pending: false, disabled: true});
+expectButton(modeButtons[0], {active: false, pending: false, disabled: false});
 expectButton(modeButtons[1], {active: false, pending: true, disabled: true});
-assert.strictEqual(elements['control-lock'].hidden, false);
+expectButton(navButtons[0], {active: false, pending: false, disabled: false});
+assert.strictEqual(elements['control-lock'].hidden, true);
 render(state({mode: 'spa'}));
 expectButton(modeButtons[1], {active: true, pending: false, disabled: false});
 
@@ -137,6 +138,8 @@ setPending({kind: 'speed', target: 'speed2', accepted: true, startedAt: Date.now
 render(state({mode: 'spa'}));
 expectButton(speedButtons[0], {active: false, pending: false, disabled: true});
 expectButton(speedButtons[1], {active: false, pending: true, disabled: true});
+expectButton(navButtons[0], {active: false, pending: false, disabled: true});
+assert.strictEqual(elements['control-lock'].hidden, false);
 render(state({mode: 'spa', vsp: {enabled: true, busy: true, phase: 'holding', target_name: 'speed2'}}));
 expectButton(speedButtons[1], {active: true, pending: false, disabled: false});
 
@@ -171,6 +174,9 @@ assert.strictEqual(releaseButton.attributes['aria-pressed'], 'false');
 setPending({kind: 'switch', control: 'lights', target: true, accepted: true, startedAt: Date.now()});
 render(state({mode: 'spa'}));
 expectButton(switchButtons[2], {active: false, pending: true, disabled: true});
+expectButton(switchButtons[3], {active: false, pending: false, disabled: false});
+expectButton(navButtons[0], {active: false, pending: false, disabled: false});
+assert.strictEqual(elements['control-lock'].hidden, true);
 render(state({mode: 'spa', lights: true}));
 expectButton(switchButtons[2], {active: true, pending: false, disabled: false});
 

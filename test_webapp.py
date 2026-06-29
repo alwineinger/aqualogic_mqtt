@@ -91,8 +91,9 @@ class WebApiContractTest(unittest.TestCase):
         response = create_app(static_dir=static_dir).test_client().get("/")
         html = response.get_data(as_text=True)
         self.assertIn("const automationEnabled = state.automation?.enabled === true", html)
-        self.assertIn("controlsLocked = state.controls_locked === true || pendingControl !== null", html)
-        self.assertIn("The backend excludes a scheduled VSP `holding` lease", html)
+        self.assertIn("const localMenuPending = pendingControl?.kind === 'speed'", html)
+        self.assertIn("controlsLocked = state.controls_locked === true || localMenuPending", html)
+        self.assertIn("Direct mode/equipment commands keep only their selected button pending", html)
         self.assertIn("state.automation?.pool_heat_enabled === true", html)
         response.close()
 
@@ -162,14 +163,14 @@ class WebApiContractTest(unittest.TestCase):
             self.assertFalse(holding["controls_locked"])
             self.assertIsNone(holding["control_lock_reason"])
 
-    def test_equipment_status_locks_for_automation_reconciliation_phase(self):
+    def test_equipment_status_does_not_lock_for_direct_control_or_priming(self):
         equipment = MagicMock()
-        equipment.status.return_value = {"busy": False, "phase": "complete"}
+        equipment.status.return_value = {"busy": True, "phase": "transitioning"}
         vsp = MagicMock()
         vsp.status.return_value = {
             "busy": False,
             "phase": "complete",
-            "hardware_priming": False,
+            "hardware_priming": True,
         }
         automation = MagicMock()
         automation.status.return_value = {"enabled": True, "phase": "setting_lights"}
@@ -181,8 +182,30 @@ class WebApiContractTest(unittest.TestCase):
         ):
             status = controls.get_equipment_status()
 
+        self.assertFalse(status["controls_locked"])
+        self.assertIsNone(status["control_lock_reason"])
+
+    def test_equipment_status_locks_for_clock_menu_navigation(self):
+        equipment = MagicMock()
+        equipment.status.return_value = {"busy": False, "phase": "idle"}
+        vsp = MagicMock()
+        vsp.status.return_value = {"busy": False, "phase": "idle"}
+        automation = MagicMock()
+        automation.status.return_value = {
+            "enabled": True,
+            "phase": "clock_sync",
+            "clock_sync": {"busy": True},
+        }
+
+        with (
+            patch.object(controls, "_equipment", equipment),
+            patch.object(controls, "_vsp_driver", vsp),
+            patch.object(controls, "_automation", automation),
+        ):
+            status = controls.get_equipment_status()
+
         self.assertTrue(status["controls_locked"])
-        self.assertIn("setting lights", status["control_lock_reason"])
+        self.assertIn("Synchronizing", status["control_lock_reason"])
 
     @patch("aqualogic_mqtt.webapp.controls.activate_openclaw_spa")
     def test_openclaw_spa_start_endpoint(self, activate):

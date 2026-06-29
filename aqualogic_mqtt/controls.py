@@ -120,41 +120,15 @@ def stop_openclaw_spa(session_id: Optional[str] = None) -> dict:
     return _automation.stop_openclaw_spa(session_id)
 
 def _web_control_lock(equipment: dict, vsp: dict, automation: dict) -> tuple[bool, Optional[str]]:
-    """Describe transient controller work that makes WebUI input unsafe."""
-    if vsp.get("hardware_priming"):
-        return True, "PL-PLUS priming is in progress"
-
+    """Lock globally only while automation owns the PL-PLUS LCD menu."""
     clock_sync = automation.get("clock_sync") or {}
     if clock_sync.get("busy"):
         return True, "Synchronizing the PL-PLUS clock"
-
-    if equipment.get("busy"):
-        phase = str(equipment.get("phase") or "equipment control").replace("_", " ")
-        return True, f"Equipment control in progress: {phase}"
 
     vsp_phase = str(vsp.get("phase") or "")
     if vsp.get("busy") and vsp_phase != "holding":
         label = vsp_phase.replace("_", " ") or "pump speed control"
         return True, f"Pump control in progress: {label}"
-
-    automation_phase = str(automation.get("phase") or "")
-    automation_action = (
-        automation_phase.startswith("setting_")
-        or automation_phase.startswith("releasing_speed_")
-        or automation_phase in {
-            "changing_speed",
-            "clock_sync",
-            "holding_speed_for_mode",
-            "waiting_for_prep_speed",
-            "waiting_for_prep_speed_recovery",
-            "waiting_for_clock",
-            "waiting_for_mode",
-            "waiting_for_speed_before_mode",
-            "waiting_for_speed_recovery",
-        }
-    )
-    if automation.get("enabled") and automation_action:
-        return True, f"Automation in progress: {automation_phase.replace('_', ' ')}"
 
     return False, None
 
