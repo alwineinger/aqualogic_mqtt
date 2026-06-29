@@ -14,6 +14,8 @@ from threading import Lock
 from typing import Callable, Mapping, Optional, Sequence
 from zoneinfo import ZoneInfo
 
+from .vsp import PRESET_SPEEDS
+
 
 LOCAL_TIMEZONE = ZoneInfo("America/New_York")
 UTC = timezone.utc
@@ -614,6 +616,12 @@ class AutomationEngine:
                         with self._lock:
                             self._phase = "waiting_for_prep_speed"
                         return False
+                elif (
+                    vsp.get("phase") == "observed"
+                    and vsp.get("target_name") == "speed1"
+                    and vsp.get("verified")
+                ):
+                    pass
                 elif vsp.get("rollback_pending"):
                     with self._lock:
                         self._phase = "waiting_for_prep_speed_recovery"
@@ -664,6 +672,11 @@ class AutomationEngine:
                         with self._lock:
                             self._phase = "releasing_speed_for_mode"
                         return True
+                elif vsp.get("phase") == "observed" and not speed_preserving_mode_change:
+                    self._vsp.clear_target()
+                    with self._lock:
+                        self._phase = "releasing_speed_for_mode"
+                    return True
                 if equipment.get("busy"):
                     with self._lock:
                         self._phase = "waiting_for_mode"
@@ -721,6 +734,31 @@ class AutomationEngine:
             if vsp.get("rollback_pending"):
                 with self._lock:
                     self._phase = "waiting_for_speed_recovery"
+                return False
+
+            if vsp.get("requested_speed_pct") is None:
+                with self._lock:
+                    self._phase = "waiting_for_speed_observation"
+                    self._last_error = None
+                return False
+
+            expected_pct = PRESET_SPEEDS[target]
+            observed_matches = vsp.get("requested_speed_pct") == expected_pct
+            if (
+                vsp.get("phase") == "observed"
+                and current_target == target
+                and vsp.get("verified")
+                and observed_matches
+            ):
+                with self._lock:
+                    self._phase = "observed_speed"
+                    self._last_error = None
+                return False
+            if observed_matches:
+                self._vsp.adopt_observed_preset(target, source=desired.source)
+                with self._lock:
+                    self._phase = "observed_speed"
+                    self._last_error = None
                 return False
 
             self._vsp.request_preset(
