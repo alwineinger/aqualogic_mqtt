@@ -265,19 +265,22 @@ class VspDriver:
             self._assert_interlocks_locked(now)
             if self._worker is not None and self._worker.is_alive():
                 raise VspBusyError("a VSP menu operation is already active")
-            if self._rollback_pending():
-                raise VspBusyError("a persisted VSP rollback must complete before adopting observed speed")
             target_pct = PRESET_SPEEDS[name]
             if self._state.requested_speed_pct != target_pct:
                 raise VspInterlockError(
                     f"observed pump request is {self._state.requested_speed_pct!r}%, not {target_pct}%"
                 )
+            rollback = self._read_rollback() if self._rollback_pending() else None
+            if rollback is not None and rollback.get("target_pct") != target_pct:
+                raise VspBusyError(
+                    "persisted VSP rollback target does not match the observed desired speed"
+                )
             self._operation_id = None
             self._phase = "observed"
             self._target_name = name
             self._target_pct = target_pct
-            self._edited_preset = None
-            self._original_pct = None
+            self._edited_preset = rollback.get("preset") if rollback is not None else None
+            self._original_pct = rollback.get("original_pct") if rollback is not None else None
             self._lease_expires_at = None
             self._last_error = None
             self._cancel.clear()
@@ -305,29 +308,34 @@ class VspDriver:
             active = self._worker is not None and self._worker.is_alive()
         if active and not enabled:
             self._cancel.set()
-        if active or not self._rollback_pending():
-            return False
+        return False
 
+    def recover_pending(self) -> dict:
+        """Explicitly restore a persisted preset edit.
+
+        A rollback journal is also the durable record of a live speed lease.
+        Startup must therefore let automation adopt an already-satisfied
+        target before deciding that menu-based recovery is necessary.
+        """
+        if not self._rollback_pending():
+            return self.status()
         with self._lock:
             if self._worker is not None and self._worker.is_alive():
-                return False
-            try:
+                worker = None
+            else:
                 self._assert_hardware_interlocks_locked(self._clock())
-            except VspInterlockError as exc:
-                self._last_error = f"rollback pending: {exc}"
-                return False
-            operation_id = uuid.uuid4().hex
-            self._operation_id = operation_id
-            self._phase = "recovery_queued"
-            self._last_error = None
-            worker = Thread(
-                target=self._run_recovery,
-                name=f"plplus-vsp-recover-{operation_id[:8]}",
-                daemon=True,
-            )
-            self._worker = worker
-            worker.start()
-        return True
+                operation_id = uuid.uuid4().hex
+                self._operation_id = operation_id
+                self._phase = "recovery_queued"
+                self._last_error = None
+                worker = Thread(
+                    target=self._run_recovery,
+                    name=f"plplus-vsp-recover-{operation_id[:8]}",
+                    daemon=True,
+                )
+                self._worker = worker
+                worker.start()
+        return self.status()
 
     def is_busy(self) -> bool:
         with self._lock:
@@ -678,6 +686,13 @@ class VspDriver:
     def status(self) -> dict:
         now = self._clock()
         hardware_priming = self._hardware_prime_active()
+        rollback_pending = self._rollback_pending()
+        rollback_target_pct = None
+        if rollback_pending:
+            try:
+                rollback_target_pct = self._read_rollback().get("target_pct")
+            except Exception:
+                pass
         with self._lock:
             lease_remaining = None
             if self._lease_expires_at is not None:
@@ -686,7 +701,8 @@ class VspDriver:
                 "enabled": self._is_enabled_locked(),
                 "enable_file": self._enable_file,
                 "rollback_file": self._rollback_file,
-                "rollback_pending": self._rollback_pending(),
+                "rollback_pending": rollback_pending,
+                "rollback_target_pct": rollback_target_pct,
                 "operation_id": self._operation_id,
                 "phase": self._phase,
                 "busy": self._worker is not None and self._worker.is_alive(),

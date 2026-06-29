@@ -135,6 +135,7 @@ class FakeVsp:
             "verified": False,
             "lease_remaining_sec": None,
             "rollback_pending": False,
+            "rollback_target_pct": None,
             "hardware_priming": False,
         }
         self.calls = []
@@ -170,6 +171,10 @@ class FakeVsp:
             "target_name": None,
             "verified": False,
         })
+
+    def recover_pending(self):
+        self.calls.append(("recover",))
+        self.state.update({"busy": True, "phase": "recovering"})
 
 
 class FakeClockSync:
@@ -234,6 +239,30 @@ class AutomationEngineTest(unittest.TestCase):
         self.assertEqual(vsp.state["target_name"], "speed1")
         self.assertTrue(vsp.state["verified"])
         self.assertEqual(engine.status()["phase"], "observed_speed")
+
+    def test_matching_persisted_lease_is_adopted_without_recovery(self):
+        engine, _equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
+        vsp.state.update({
+            "requested_speed_pct": 70,
+            "rollback_pending": True,
+            "rollback_target_pct": 70,
+        })
+
+        self.assertFalse(engine.tick())
+        self.assertEqual(vsp.calls, [("adopt", "speed1", "schedule")])
+        self.assertEqual(engine.status()["phase"], "observed_speed")
+
+    def test_incompatible_persisted_lease_is_recovered_before_speed_change(self):
+        engine, _equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
+        vsp.state.update({
+            "requested_speed_pct": 70,
+            "rollback_pending": True,
+            "rollback_target_pct": 55,
+        })
+
+        self.assertTrue(engine.tick())
+        self.assertEqual(vsp.calls, [("recover",)])
+        self.assertEqual(engine.status()["phase"], "recovering_speed")
 
     def test_startup_waits_for_initial_speed_observation_before_using_menu(self):
         engine, _equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])

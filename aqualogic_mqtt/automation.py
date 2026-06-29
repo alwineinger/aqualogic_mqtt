@@ -623,9 +623,18 @@ class AutomationEngine:
                 ):
                     pass
                 elif vsp.get("rollback_pending"):
+                    if (
+                        vsp.get("requested_speed_pct") == PRESET_SPEEDS["speed1"]
+                        and vsp.get("rollback_target_pct") == PRESET_SPEEDS["speed1"]
+                    ):
+                        self._vsp.adopt_observed_preset("speed1", source="calendar")
+                        with self._lock:
+                            self._phase = "observed_prep_speed"
+                        return True
+                    self._vsp.recover_pending()
                     with self._lock:
-                        self._phase = "waiting_for_prep_speed_recovery"
-                    return False
+                        self._phase = "recovering_prep_speed"
+                    return True
                 else:
                     self._vsp.request_preset(
                         "speed1",
@@ -676,6 +685,11 @@ class AutomationEngine:
                     self._vsp.clear_target()
                     with self._lock:
                         self._phase = "releasing_speed_for_mode"
+                    return True
+                elif vsp.get("rollback_pending") and not speed_preserving_mode_change:
+                    self._vsp.recover_pending()
+                    with self._lock:
+                        self._phase = "recovering_speed_for_mode"
                     return True
                 if equipment.get("busy"):
                     with self._lock:
@@ -731,11 +745,6 @@ class AutomationEngine:
                 with self._lock:
                     self._phase = "holding_speed"
                 return False
-            if vsp.get("rollback_pending"):
-                with self._lock:
-                    self._phase = "waiting_for_speed_recovery"
-                return False
-
             if vsp.get("requested_speed_pct") is None:
                 with self._lock:
                     self._phase = "waiting_for_speed_observation"
@@ -744,6 +753,10 @@ class AutomationEngine:
 
             expected_pct = PRESET_SPEEDS[target]
             observed_matches = vsp.get("requested_speed_pct") == expected_pct
+            rollback_compatible = (
+                not vsp.get("rollback_pending")
+                or vsp.get("rollback_target_pct") == expected_pct
+            )
             if (
                 vsp.get("phase") == "observed"
                 and current_target == target
@@ -754,12 +767,18 @@ class AutomationEngine:
                     self._phase = "observed_speed"
                     self._last_error = None
                 return False
-            if observed_matches:
+            if observed_matches and rollback_compatible:
                 self._vsp.adopt_observed_preset(target, source=desired.source)
                 with self._lock:
                     self._phase = "observed_speed"
                     self._last_error = None
                 return False
+
+            if vsp.get("rollback_pending"):
+                self._vsp.recover_pending()
+                with self._lock:
+                    self._phase = "recovering_speed"
+                return True
 
             self._vsp.request_preset(
                 target,

@@ -203,7 +203,7 @@ class VspDriverTest(unittest.TestCase):
         self.assertTrue(wait_until(lambda: not driver.is_busy()))
         self.assertFalse(driver.is_menu_busy())
 
-    def test_persisted_rollback_recovers_after_process_restart(self):
+    def test_persisted_rollback_waits_for_explicit_recovery_after_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             rollback_file = os.path.join(directory, "rollback.json")
             with open(rollback_file, "w", encoding="utf-8") as handle:
@@ -227,11 +227,46 @@ class VspDriverTest(unittest.TestCase):
                 filter_on=True,
                 service_mode=False,
             ))
-            self.assertTrue(driver.tick())
+            self.assertFalse(driver.tick())
+            self.assertFalse(driver.is_busy())
+            self.assertEqual(controller.keys, [])
+            self.assertEqual(driver.status()["rollback_target_pct"], 55)
+
+            driver.recover_pending()
             self.assertTrue(wait_until(lambda: not driver.is_busy()))
             self.assertEqual(controller.presets[1], 70)
             self.assertFalse(os.path.exists(rollback_file))
             self.assertEqual(driver.status()["phase"], "recovered")
+
+    def test_matching_persisted_lease_is_adopted_without_menu_navigation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rollback_file = os.path.join(directory, "rollback.json")
+            with open(rollback_file, "w", encoding="utf-8") as handle:
+                json.dump({
+                    "preset": "speed1",
+                    "original_pct": 70,
+                    "target_pct": 55,
+                    "created_at_utc": "2026-06-27T14:00:00Z",
+                }, handle)
+            controller = FakeController(active_preset=1)
+            controller.presets[1] = 55
+            driver = self.make_driver(controller, rollback_file=rollback_file)
+            driver.observe(PanelPumpState(
+                requested_speed_pct=55,
+                pump_power_w=230,
+                filter_on=True,
+                service_mode=False,
+            ))
+
+            status = driver.adopt_observed_preset("speed3")
+
+            self.assertEqual(status["phase"], "observed")
+            self.assertEqual(status["target_name"], "speed3")
+            self.assertEqual(status["edited_preset"], "speed1")
+            self.assertEqual(status["original_pct"], 70)
+            self.assertTrue(status["rollback_pending"])
+            self.assertTrue(status["verified"])
+            self.assertEqual(controller.keys, [])
 
     def test_service_mode_blocks_request(self):
         controller = FakeController()

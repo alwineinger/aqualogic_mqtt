@@ -233,7 +233,10 @@ Safety behavior:
   adopted in memory without opening the Settings menu. Continued observation
   still invokes the VSP driver if that request later drifts from schedule. If
   the initial speed has not arrived yet, automation waits rather than treating
-  an unknown value as a mismatch.
+  an unknown value as a mismatch. A persisted rollback journal whose target
+  matches both the observed request and desired speed is treated as the durable
+  record of that active lease and is also adopted without menu navigation.
+  Journal recovery is explicitly started only when those values do not match.
 - The host never starts or estimates a priming interval. When PL-PLUS reports
   `Prime`, `Priming`, or `Start Delay` on its live display/default-menu state,
   automation pauses all reconciliation and resumes after that hardware-owned
