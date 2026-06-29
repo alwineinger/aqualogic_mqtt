@@ -97,6 +97,7 @@ class DesiredState:
     filter_on: bool = True
     suppress_filter_speed: bool = False
     session_id: Optional[str] = None
+    session_phase: Optional[str] = None
     switches: Mapping[str, Optional[bool]] = field(default_factory=dict)
 
 
@@ -151,6 +152,26 @@ class ScheduleResolver:
         scheduled = self.scheduled_preset(local.timetz().replace(tzinfo=None))
 
         if openclaw_spa_session is not None:
+            session_phase = str(openclaw_spa_session.get("phase") or "spa")
+            if session_phase == "scheduled":
+                prep_start = parse_utc(openclaw_spa_session.get("prep_start_utc"))
+                preheat_start = parse_utc(openclaw_spa_session.get("preheat_start_utc"))
+                if now < prep_start:
+                    # The one-shot calendar plan is armed but must not affect
+                    # lower-priority equipment state before its exact start.
+                    openclaw_spa_session = None
+                elif now < preheat_start:
+                    return DesiredState(
+                        source="calendar",
+                        mode="spillover",
+                        pump_preset="speed1",
+                        filter_on=True,
+                        session_id=str(openclaw_spa_session.get("session_id") or "openclaw"),
+                        session_phase="prep",
+                        switches={},
+                    )
+
+        if openclaw_spa_session is not None:
             return DesiredState(
                 source="calendar",
                 mode="spa",
@@ -158,6 +179,7 @@ class ScheduleResolver:
                 filter_on=True,
                 suppress_filter_speed=True,
                 session_id=str(openclaw_spa_session.get("session_id") or "openclaw"),
+                session_phase="spa",
                 switches={"auto_heat": True, "heater_relay": True},
             )
 
@@ -284,10 +306,28 @@ class AutomationEngine:
             )
             openclaw_spa = payload.get("openclaw_spa_session")
             if openclaw_spa:
+                raw_openclaw_spa = dict(openclaw_spa)
+                phase = str(openclaw_spa.get("phase") or "spa")
+                if phase not in ("spa", "scheduled"):
+                    raise ValueError(f"invalid OpenClaw spa session phase: {phase}")
                 openclaw_spa = {
                     "session_id": str(openclaw_spa.get("session_id") or "openclaw"),
                     "started_utc": format_utc(parse_utc(openclaw_spa.get("started_utc"))),
+                    "phase": phase,
                 }
+                if phase == "scheduled":
+                    prep_start = parse_utc(payload["openclaw_spa_session"].get("prep_start_utc"))
+                    preheat_start = parse_utc(payload["openclaw_spa_session"].get("preheat_start_utc"))
+                    if prep_start >= preheat_start:
+                        raise ValueError("OpenClaw prep start must precede preheat start")
+                    openclaw_spa.update({
+                        "prep_start_utc": format_utc(prep_start),
+                        "preheat_start_utc": format_utc(preheat_start),
+                    })
+                elif raw_openclaw_spa.get("spa_started_utc"):
+                    openclaw_spa["spa_started_utc"] = format_utc(
+                        parse_utc(raw_openclaw_spa.get("spa_started_utc"))
+                    )
             with self._lock:
                 self._manual_override = manual
                 self._openclaw_spa_session = openclaw_spa
@@ -321,17 +361,49 @@ class AutomationEngine:
         self,
         *,
         session_id: Optional[str] = None,
+        phase: str = "spa",
+        prep_start_utc: Optional[str] = None,
+        preheat_start_utc: Optional[str] = None,
     ) -> dict:
         if not self.is_enabled():
             raise RuntimeError("host automation is disabled; refusing to queue an OpenClaw spa session")
         now = parse_utc(self._now())
         requested_id = str(session_id or format_utc(now))
         identifier = requested_id if requested_id.startswith("openclaw") else f"openclaw-{requested_id}"
+        session_phase = str(phase or "spa").strip().lower()
+        if session_phase not in ("spa", "scheduled"):
+            raise ValueError("OpenClaw spa phase must be spa or scheduled")
+
+        prep_start = None
+        preheat_start = None
+        if session_phase == "scheduled":
+            if prep_start_utc is None or preheat_start_utc is None:
+                raise ValueError("scheduled Spa preparation requires prep_start_utc and preheat_start_utc")
+            prep_start = parse_utc(prep_start_utc)
+            preheat_start = parse_utc(preheat_start_utc)
+            if prep_start >= preheat_start:
+                raise ValueError("prep_start_utc must precede preheat_start_utc")
+
         with self._lock:
-            self._openclaw_spa_session = {
+            existing = self._openclaw_spa_session or {}
+            started_utc = (
+                existing.get("started_utc")
+                if existing.get("session_id") == identifier
+                else format_utc(now)
+            )
+            session = {
                 "session_id": identifier,
-                "started_utc": format_utc(now),
+                "started_utc": started_utc,
+                "phase": session_phase,
             }
+            if session_phase == "scheduled":
+                session.update({
+                    "prep_start_utc": format_utc(prep_start),
+                    "preheat_start_utc": format_utc(preheat_start),
+                })
+            else:
+                session["spa_started_utc"] = format_utc(now)
+            self._openclaw_spa_session = session
             self._save_locked()
         return self.status()
 
@@ -514,10 +586,6 @@ class AutomationEngine:
                         self._phase = "clock_sync"
                     return True
 
-            # Spa mode selects a different hardware pump preset, so release a
-            # leased Filter Speed edit before entering/leaving Spa. Spillover
-            # is different: it must retain the active speed and its transition
-            # is safe while a VSP lease is merely holding on the default menu.
             current_mode = equipment.get("mode")
             if current_mode not in ("pool", "spa", "spillover"):
                 with self._lock:
@@ -525,6 +593,45 @@ class AutomationEngine:
                     self._last_error = None
                 return False
 
+            # A scheduled calendar preparation must establish Speed 1 before
+            # moving the valves to Spillover. This avoids spending the valve
+            # transition at a prior schedule/manual speed. Manual Spa sessions
+            # never carry the prep phase and bypass this path entirely.
+            if desired.session_phase == "prep" and current_mode != "spillover":
+                if equipment.get("busy"):
+                    with self._lock:
+                        self._phase = "waiting_for_mode"
+                    return False
+                if vsp.get("busy"):
+                    if vsp.get("phase") == "holding" and vsp.get("target_name") == "speed1":
+                        pass
+                    elif vsp.get("phase") == "holding":
+                        self._vsp.clear_target()
+                        with self._lock:
+                            self._phase = "releasing_speed_for_prep"
+                        return True
+                    else:
+                        with self._lock:
+                            self._phase = "waiting_for_prep_speed"
+                        return False
+                elif vsp.get("rollback_pending"):
+                    with self._lock:
+                        self._phase = "waiting_for_prep_speed_recovery"
+                    return False
+                else:
+                    self._vsp.request_preset(
+                        "speed1",
+                        source="calendar",
+                        lease_seconds=self._speed_lease_seconds,
+                    )
+                    with self._lock:
+                        self._phase = "setting_prep_speed"
+                    return True
+
+            # Spa mode selects a different hardware pump preset, so release a
+            # leased Filter Speed edit before entering/leaving Spa. Spillover
+            # is different: it must retain the active speed and its transition
+            # is safe while a VSP lease is merely holding on the default menu.
             mode_change = current_mode != desired.mode
             spillover_change = mode_change and desired.mode == "spillover"
             if desired.suppress_filter_speed or mode_change:

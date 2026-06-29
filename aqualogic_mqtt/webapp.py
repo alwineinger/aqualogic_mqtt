@@ -124,7 +124,9 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
         desired = status.get("desired") or {}
         return jsonify({
             "ok": True,
+            "armed": session is not None,
             "active": bool(status.get("enabled")) and desired.get("source") == "calendar" and session is not None,
+            "phase": session.get("phase") if session else None,
             "session": session,
             "desired": desired,
             "automation_enabled": status.get("enabled"),
@@ -135,7 +137,27 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
     def api_openclaw_spa_start():
         body = request.get_json(silent=True) or {}
         try:
-            status = controls.activate_openclaw_spa(body)
+            status = controls.activate_openclaw_spa({
+                "session_id": body.get("session_id"),
+                "phase": "spa",
+            })
+        except (ValueError, TypeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except RuntimeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({"ok": True, "status": status}), 202
+
+    @app.post("/api/openclaw/spa/prepare")
+    @require_auth
+    def api_openclaw_spa_prepare():
+        body = request.get_json(silent=True) or {}
+        try:
+            status = controls.activate_openclaw_spa({
+                "session_id": body.get("session_id"),
+                "phase": "scheduled",
+                "prep_start_utc": body.get("prep_start_utc"),
+                "preheat_start_utc": body.get("preheat_start_utc"),
+            })
         except (ValueError, TypeError) as exc:
             return jsonify({"ok": False, "error": str(exc)}), 400
         except RuntimeError as exc:

@@ -109,6 +109,9 @@ def activate_openclaw_spa(values: dict) -> dict:
         raise RuntimeError("automation engine is not registered")
     return _automation.activate_openclaw_spa(
         session_id=values.get("session_id"),
+        phase=values.get("phase", "spa"),
+        prep_start_utc=values.get("prep_start_utc"),
+        preheat_start_utc=values.get("preheat_start_utc"),
     )
 
 def stop_openclaw_spa(session_id: Optional[str] = None) -> dict:
@@ -141,6 +144,8 @@ def _web_control_lock(equipment: dict, vsp: dict, automation: dict) -> tuple[boo
         or automation_phase in {
             "changing_speed",
             "clock_sync",
+            "waiting_for_prep_speed",
+            "waiting_for_prep_speed_recovery",
             "waiting_for_clock",
             "waiting_for_mode",
             "waiting_for_speed_recovery",

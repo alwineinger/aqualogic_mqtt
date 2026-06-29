@@ -385,10 +385,101 @@ class AutomationEngineTest(unittest.TestCase):
         self.assertEqual(desired["mode"], "spa")
         self.assertEqual(desired["switches"], {"auto_heat": True, "heater_relay": True})
         self.assertEqual(status["openclaw_spa_session"]["session_id"], "openclaw-event-1")
+        self.assertEqual(status["openclaw_spa_session"]["phase"], "spa")
         self.assertEqual(status["openclaw_spa_session"]["started_utc"], "2026-06-27T16:00:00Z")
         stopped = engine.stop_openclaw_spa("openclaw-event-1")
         self.assertEqual(stopped["desired"]["source"], "schedule")
         self.assertEqual(stopped["desired"]["switches"], {"auto_heat": False})
+
+    def test_scheduled_spa_has_exact_calendar_prep_then_preheat(self):
+        now = ["2026-06-27T15:50:00Z"]
+        engine, _equipment, _vsp = self.make_engine(now)
+        armed = engine.activate_openclaw_spa(
+            session_id="calendar-event-1",
+            phase="scheduled",
+            prep_start_utc="2026-06-27T15:55:00Z",
+            preheat_start_utc="2026-06-27T16:00:00Z",
+        )
+        self.assertEqual(armed["desired"]["source"], "schedule")
+        self.assertEqual(armed["openclaw_spa_session"]["phase"], "scheduled")
+
+        now[0] = "2026-06-27T15:55:00Z"
+        prep = engine.status()["desired"]
+        self.assertEqual(prep["source"], "calendar")
+        self.assertEqual(prep["mode"], "spillover")
+        self.assertEqual(prep["pump_preset"], "speed1")
+        self.assertEqual(prep["session_phase"], "prep")
+        self.assertEqual(prep["switches"], {})
+
+        now[0] = "2026-06-27T15:59:59Z"
+        self.assertEqual(engine.status()["desired"]["mode"], "spillover")
+        now[0] = "2026-06-27T16:00:00Z"
+        preheat = engine.status()["desired"]
+        self.assertEqual(preheat["source"], "calendar")
+        self.assertEqual(preheat["mode"], "spa")
+        self.assertIsNone(preheat["pump_preset"])
+        self.assertEqual(preheat["session_phase"], "spa")
+        self.assertEqual(preheat["switches"], {"auto_heat": True, "heater_relay": True})
+
+    def test_calendar_prep_establishes_speed1_before_spillover(self):
+        now = ["2026-06-27T15:55:00Z"]
+        engine, equipment, vsp = self.make_engine(now)
+        engine.activate_openclaw_spa(
+            session_id="calendar-speed-first",
+            phase="scheduled",
+            prep_start_utc="2026-06-27T15:55:00Z",
+            preheat_start_utc="2026-06-27T16:00:00Z",
+        )
+
+        self.assertTrue(engine.tick())
+        self.assertEqual(vsp.calls, [("speed", "speed1", "calendar")])
+        self.assertEqual(equipment.calls, [])
+
+        vsp.state.update({
+            "busy": True,
+            "phase": "holding",
+            "target_name": "speed1",
+            "lease_remaining_sec": 80,
+        })
+        self.assertTrue(engine.tick())
+        self.assertEqual(equipment.calls, [("mode", "spillover")])
+
+    def test_calendar_prep_overrides_manual_only_during_its_window(self):
+        now = ["2026-06-27T15:50:00Z"]
+        engine, _equipment, _vsp = self.make_engine(now)
+        engine.set_manual(mode="pool", pump_preset="speed3")
+        engine.activate_openclaw_spa(
+            session_id="calendar-event-2",
+            phase="scheduled",
+            prep_start_utc="2026-06-27T15:55:00Z",
+            preheat_start_utc="2026-06-27T16:00:00Z",
+        )
+        self.assertEqual(engine.status()["desired"]["source"], "manual")
+        self.assertEqual(engine.status()["desired"]["pump_preset"], "speed3")
+        now[0] = "2026-06-27T15:55:00Z"
+        self.assertEqual(engine.status()["desired"]["source"], "calendar")
+        self.assertEqual(engine.status()["desired"]["pump_preset"], "speed1")
+
+    def test_manual_spa_session_bypasses_calendar_prep(self):
+        now = ["2026-06-27T15:55:00Z"]
+        engine, _equipment, _vsp = self.make_engine(now)
+        status = engine.activate_openclaw_spa(session_id="manual-session")
+        self.assertEqual(status["openclaw_spa_session"]["phase"], "spa")
+        self.assertEqual(status["desired"]["mode"], "spa")
+        self.assertIsNone(status["desired"]["pump_preset"])
+
+    def test_scheduled_prep_requires_ordered_utc_timestamps(self):
+        now = ["2026-06-27T15:50:00Z"]
+        engine, _equipment, _vsp = self.make_engine(now)
+        with self.assertRaisesRegex(ValueError, "requires prep_start_utc"):
+            engine.activate_openclaw_spa(session_id="event", phase="scheduled")
+        with self.assertRaisesRegex(ValueError, "must precede"):
+            engine.activate_openclaw_spa(
+                session_id="event",
+                phase="scheduled",
+                prep_start_utc="2026-06-27T16:00:00Z",
+                preheat_start_utc="2026-06-27T16:00:00Z",
+            )
 
     def test_openclaw_spa_restores_current_pool_heat_preference(self):
         now = ["2026-06-27T16:00:00Z"]
@@ -424,6 +515,24 @@ class AutomationEngineTest(unittest.TestCase):
                 restarted.status()["openclaw_spa_session"]["session_id"],
                 "openclaw-event-1",
             )
+
+    def test_scheduled_prep_survives_restart_with_utc_boundaries(self):
+        now = ["2026-06-27T15:50:00Z"]
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = os.path.join(directory, "automation.json")
+            engine, _equipment, _vsp = self.make_engine(now, state_file=state_file)
+            engine.activate_openclaw_spa(
+                session_id="calendar-restart",
+                phase="scheduled",
+                prep_start_utc="2026-06-27T15:55:00-00:00",
+                preheat_start_utc="2026-06-27T12:00:00-04:00",
+            )
+            now[0] = "2026-06-27T15:56:00Z"
+            restarted, _equipment2, _vsp2 = self.make_engine(now, state_file=state_file)
+            session = restarted.status()["openclaw_spa_session"]
+            self.assertEqual(session["prep_start_utc"], "2026-06-27T15:55:00Z")
+            self.assertEqual(session["preheat_start_utc"], "2026-06-27T16:00:00Z")
+            self.assertEqual(restarted.status()["desired"]["mode"], "spillover")
 
 
 if __name__ == "__main__":

@@ -189,7 +189,41 @@ class WebApiContractTest(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 202)
         self.assertTrue(response.get_json()["ok"])
-        activate.assert_called_once()
+        activate.assert_called_once_with({
+            "session_id": "openclaw-test",
+            "phase": "spa",
+        })
+
+    @patch("aqualogic_mqtt.webapp.controls.activate_openclaw_spa")
+    def test_openclaw_scheduled_prep_endpoint(self, activate):
+        activate.return_value = {"desired": {"source": "schedule", "mode": "pool"}}
+        response = self.client.post("/api/openclaw/spa/prepare", json={
+            "session_id": "openclaw-calendar",
+            "phase": "scheduled",
+            "prep_start_utc": "2026-06-27T15:55:00Z",
+            "preheat_start_utc": "2026-06-27T16:00:00Z",
+        })
+        self.assertEqual(response.status_code, 202)
+        self.assertTrue(response.get_json()["ok"])
+        activate.assert_called_once_with({
+            "session_id": "openclaw-calendar",
+            "phase": "scheduled",
+            "prep_start_utc": "2026-06-27T15:55:00Z",
+            "preheat_start_utc": "2026-06-27T16:00:00Z",
+        })
+
+    @patch("aqualogic_mqtt.webapp.controls.get_automation_status")
+    def test_openclaw_status_distinguishes_armed_plan(self, status):
+        status.return_value = {
+            "enabled": True,
+            "desired": {"source": "schedule", "mode": "pool"},
+            "openclaw_spa_session": {"session_id": "openclaw-calendar", "phase": "scheduled"},
+        }
+        response = self.client.get("/api/openclaw/spa")
+        body = response.get_json()
+        self.assertTrue(body["armed"])
+        self.assertFalse(body["active"])
+        self.assertEqual(body["phase"], "scheduled")
 
 
 if __name__ == "__main__":

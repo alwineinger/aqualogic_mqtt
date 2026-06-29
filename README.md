@@ -330,6 +330,22 @@ Activation requests Spa mode, Filter on, Aux2 heater relay on, and Auto Heat
 on. The software session has no timer; OpenClaw must stop it explicitly. The
 PL-PLUS Spa CountDn remains the independent hardware failsafe.
 
+Calendar events may first arm the same stable session ID with an exact
+five-minute preparation window:
+
+```bash
+curl -X POST http://127.0.0.1:8089/api/openclaw/spa/prepare \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"openclaw-example","prep_start_utc":"2026-06-27T19:55:00Z","preheat_start_utc":"2026-06-27T20:00:00Z"}'
+```
+
+Before `prep_start_utc` the armed plan does not override normal automation.
+From prep start until preheat start it has calendar priority and requests
+Speed 1, Spillover, and Filter on without changing heater outputs. At the exact
+preheat timestamp it resolves to the normal Spa/heat state, even if HAL's next
+60-second tick has not yet run. A later start POST is idempotent. Manual
+sessions use only the normal endpoint and enter Spa immediately without preparation.
+
 ```bash
 curl -X DELETE http://127.0.0.1:8089/api/openclaw/spa \
   -H 'Content-Type: application/json' -d '{}'
