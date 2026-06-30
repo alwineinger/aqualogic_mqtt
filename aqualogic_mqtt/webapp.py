@@ -104,6 +104,22 @@ def create_app(static_dir: str | None = None, basic_user: str | None = None, bas
             return jsonify({"ok": False, "error": str(exc)}), 503
         return jsonify({"ok": True, "status": status}), 202
 
+    @app.post("/api/heater-targets/scan")
+    @require_auth
+    def api_heater_target_scan():
+        body = request.get_json(silent=True) or {}
+        if "body" not in body:
+            return jsonify({"ok": False, "error": "JSON field 'body' is required"}), 400
+        try:
+            status = controls.scan_heater_target(body.get("body"))
+        except (ValueError, TypeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        except HeaterTargetBusyError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 409
+        except (HeaterTargetError, RuntimeError) as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        return jsonify({"ok": True, "status": status}), 202
+
     @app.get("/api/automation")
     @require_auth
     def api_automation_status():

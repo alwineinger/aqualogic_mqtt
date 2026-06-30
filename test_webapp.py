@@ -45,6 +45,13 @@ class WebApiContractTest(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         refresh.assert_called_once_with()
 
+    @patch("aqualogic_mqtt.webapp.controls.scan_heater_target")
+    def test_heater_target_body_scan_contract(self, scan):
+        scan.return_value = {"phase": "queued", "target_body": "pool"}
+        response = self.client.post("/api/heater-targets/scan", json={"body": "pool"})
+        self.assertEqual(response.status_code, 202)
+        scan.assert_called_once_with("pool")
+
     @patch("aqualogic_mqtt.webapp.controls.set_manual_override")
     def test_manual_override_api(self, set_manual):
         set_manual.return_value = {"desired": {"source": "manual"}}
@@ -52,6 +59,13 @@ class WebApiContractTest(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertTrue(response.get_json()["ok"])
         set_manual.assert_called_once_with({"mode": "spa"})
+
+    @patch("aqualogic_mqtt.webapp.controls.clear_manual_override")
+    def test_resume_schedule_clears_entire_manual_override(self, clear_manual):
+        clear_manual.return_value = {"manual_override": None}
+        response = self.client.delete("/api/automation/manual")
+        self.assertEqual(response.status_code, 200)
+        clear_manual.assert_called_once_with(None)
 
     def test_ui_contains_all_semantic_controls(self):
         static_dir = os.path.join(os.path.dirname(__file__), "aqualogic_mqtt", "static")
@@ -75,6 +89,7 @@ class WebApiContractTest(unittest.TestCase):
             'data-temperature-confirm="true"',
         ):
             self.assertIn(marker, html)
+        self.assertNotIn('data-temperature-refresh', html)
         response.close()
 
     def test_ui_hides_raw_filter_and_pool_spa_buttons(self):
@@ -123,7 +138,7 @@ class WebApiContractTest(unittest.TestCase):
         response = create_app(static_dir=static_dir).test_client().get("/")
         html = response.get_data(as_text=True)
         self.assertIn("const automationEnabled = state.automation?.enabled === true", html)
-        self.assertIn("['speed', 'temperature', 'temperature-refresh'].includes", html)
+        self.assertIn("['speed', 'temperature', 'temperature-scan'].includes", html)
         self.assertIn("controlsLocked = state.controls_locked === true || localMenuPending", html)
         self.assertIn("Direct mode/equipment commands keep only their selected button pending", html)
         self.assertIn("state.automation?.pool_heat_enabled === true", html)

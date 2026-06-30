@@ -100,6 +100,13 @@ class HeaterTargetDriver:
         self._targets: dict[str, Optional[int]] = {"pool": None, "spa": None}
         self._known: dict[str, bool] = {"pool": False, "spa": False}
         self._observed_at_utc: Optional[str] = None
+        self._observed_at_utc_by_body: dict[str, Optional[str]] = {
+            "pool": None,
+            "spa": None,
+        }
+        # Persisted values are useful display cache, but they are not proof that
+        # either setting has been seen since this process started.
+        self._observed_since_startup: dict[str, bool] = {"pool": False, "spa": False}
         self._last_error: Optional[str] = None
         self._load()
 
@@ -116,6 +123,9 @@ class HeaterTargetDriver:
                 self._targets[body] = value if isinstance(value, int) else None
                 self._known[body] = bool(known.get(body, body in targets))
             self._observed_at_utc = payload.get("observed_at_utc")
+            observed_by_body = payload.get("observed_at_utc_by_body") or {}
+            for body in ("pool", "spa"):
+                self._observed_at_utc_by_body[body] = observed_by_body.get(body)
         except Exception as exc:
             self._last_error = f"heater target state load failed: {exc}"
 
@@ -127,6 +137,7 @@ class HeaterTargetDriver:
             "targets": dict(self._targets),
             "known": dict(self._known),
             "observed_at_utc": self._observed_at_utc,
+            "observed_at_utc_by_body": dict(self._observed_at_utc_by_body),
         }
         parent = os.path.dirname(os.path.abspath(self._state_file))
         os.makedirs(parent, exist_ok=True)
@@ -158,6 +169,12 @@ class HeaterTargetDriver:
 
     def request_refresh(self) -> dict:
         return self._start(None, None)
+
+    def request_scan(self, body: str) -> dict:
+        name = str(body or "").strip().lower()
+        if name not in ("pool", "spa"):
+            raise ValueError("heater body must be pool or spa")
+        return self._start(name, None)
 
     def request_set(self, body: str, target_f: int) -> dict:
         name = str(body or "").strip().lower()
@@ -249,7 +266,35 @@ class HeaterTargetDriver:
         parsed_body, target = parse_heater_target(line)
         if parsed_body != body:
             raise HeaterTargetError(f"expected {body} heater page, got {line!r}")
+        self._record_target(body, target, force=True)
         return target
+
+    def _record_target(self, body: str, target: Optional[int], *, force: bool = False) -> None:
+        observed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        with self._lock:
+            changed = (
+                not self._known[body]
+                or self._targets[body] != target
+                or not self._observed_since_startup[body]
+            )
+            if not changed and not force:
+                return
+            self._targets[body] = target
+            self._known[body] = True
+            self._observed_since_startup[body] = True
+            self._observed_at_utc = observed_at
+            self._observed_at_utc_by_body[body] = observed_at
+            self._save_locked()
+
+    def observe_display(self, lines: object) -> None:
+        """Passively cache Heater1 pages visited by another LCD operation."""
+        values = lines if isinstance(lines, (list, tuple)) else [lines]
+        for line in values:
+            try:
+                body, target = parse_heater_target(line)
+            except ValueError:
+                continue
+            self._record_target(body, target)
 
     def _adjust_target(self, body: str, current: Optional[int], target: int) -> int:
         page = f"{body}_heater"
@@ -296,6 +341,16 @@ class HeaterTargetDriver:
                 with self._lock:
                     self._phase = "setting_spa"
                 spa = self._adjust_target("spa", spa, target_f)
+                self._record_target("spa", spa, force=True)
+
+            if body == "spa":
+                with self._lock:
+                    self._phase = "returning_to_default"
+                self._return_default()
+                with self._lock:
+                    self._phase = "complete"
+                    self._last_error = None
+                return
 
             self._press(
                 Keys.RIGHT,
@@ -307,13 +362,10 @@ class HeaterTargetDriver:
                 with self._lock:
                     self._phase = "setting_pool"
                 pool = self._adjust_target("pool", pool, target_f)
+                self._record_target("pool", pool, force=True)
 
             with self._lock:
-                self._targets = {"pool": pool, "spa": spa}
-                self._known = {"pool": True, "spa": True}
-                self._observed_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 self._phase = "returning_to_default"
-                self._save_locked()
             self._return_default()
             with self._lock:
                 self._phase = "complete"
@@ -343,6 +395,8 @@ class HeaterTargetDriver:
                 "targets": dict(self._targets),
                 "known": dict(self._known),
                 "observed_at_utc": self._observed_at_utc,
+                "observed_at_utc_by_body": dict(self._observed_at_utc_by_body),
+                "observed_since_startup": dict(self._observed_since_startup),
                 "last_error": self._last_error,
                 "minimum_f": MIN_TARGET_F,
                 "maximum_f": MAX_TARGET_F,

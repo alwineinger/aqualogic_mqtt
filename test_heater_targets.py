@@ -113,6 +113,29 @@ class HeaterTargetDriverTest(unittest.TestCase):
         self.assertNotIn(Keys.MINUS, panel.keys)
         self.assertEqual(panel.page, "default")
 
+    def test_passively_observes_targets_on_pages_visited_by_other_menu_work(self):
+        panel = FakePanel()
+        driver = self.make_driver(panel, state_file=None)
+        driver.observe_display(["Spa Heater1 101°F"])
+        driver.observe_display(["Pool Heater1 Off"])
+        status = driver.status()
+        self.assertEqual(status["targets"], {"pool": None, "spa": 101})
+        self.assertEqual(status["known"], {"pool": True, "spa": True})
+        self.assertEqual(status["observed_since_startup"], {"pool": True, "spa": True})
+        self.assertIsNotNone(status["observed_at_utc_by_body"]["spa"])
+        self.assertEqual(panel.keys, [])
+
+    def test_body_scan_reads_only_relevant_target_without_changing_it(self):
+        panel = FakePanel()
+        driver = self.make_driver(panel, state_file=None)
+        driver.request_scan("spa")
+        status = wait_complete(driver)
+        self.assertEqual(status["targets"], {"pool": None, "spa": 102})
+        self.assertEqual(status["known"], {"pool": False, "spa": True})
+        self.assertNotIn(Keys.PLUS, panel.keys)
+        self.assertNotIn(Keys.MINUS, panel.keys)
+        self.assertEqual(panel.page, "default")
+
     def test_refresh_recovers_from_an_arbitrary_top_level_menu(self):
         panel = FakePanel()
         panel.page = "timers"

@@ -296,7 +296,6 @@
           <button type="button" data-temperature-cancel="true">Cancel</button>
         </div>
       </div>
-      <button type="button" data-temperature-refresh="true">Refresh Targets</button>
     </section>
 
     <div class="default-menu">
@@ -346,7 +345,11 @@
   const COMMAND_TIMEOUT_MS = 180000;
 
   function commandCompleted(state, command) {
-    if (!command?.accepted || state.controls_locked === true || state.busy === true) return false;
+    if (!command?.accepted) return false;
+    if (command.kind === 'resume-schedule') {
+      return state.automation?.manual_override == null;
+    }
+    if (state.controls_locked === true || state.busy === true) return false;
     if (command.kind === 'mode') {
       return state.mode === command.target && state.target_mode == null;
     }
@@ -367,11 +370,12 @@
         && state.vsp?.target_name === scheduledTarget
         && speedConfirmed;
     }
-    if (command.kind === 'temperature-refresh') {
+    if (command.kind === 'temperature-scan') {
       return state.heater_targets?.busy !== true
         && state.heater_targets?.phase === 'complete'
-        && state.heater_targets?.known?.pool === true
-        && state.heater_targets?.known?.spa === true;
+        && state.heater_targets?.known?.[command.body] === true
+        && command.operationId != null
+        && state.heater_targets?.operation_id === command.operationId;
     }
     if (command.kind === 'temperature') {
       return state.heater_targets?.busy !== true
@@ -388,7 +392,14 @@
       equipmentStateEl.textContent = 'Command confirmation timed out';
       return;
     }
-    if (commandCompleted(state, pendingControl)) pendingControl = null;
+    if (commandCompleted(state, pendingControl)) {
+      if (pendingControl.kind === 'temperature-scan') {
+        selectedTemperatureBody = pendingControl.body;
+        stagedTemperatureF = state.heater_targets?.targets?.[pendingControl.body]
+          ?? state.heater_targets?.minimum_f ?? 65;
+      }
+      pendingControl = null;
+    }
   }
 
   function setButtonState(button, {active = false, pending = false} = {}) {
@@ -494,7 +505,7 @@
     const automationEnabled = state.automation?.enabled === true;
     // Direct mode/equipment commands keep only their selected button pending.
     // A speed request locks globally because it must navigate the PL-PLUS LCD.
-    const localMenuPending = ['speed', 'temperature', 'temperature-refresh'].includes(pendingControl?.kind);
+    const localMenuPending = ['speed', 'temperature', 'temperature-scan'].includes(pendingControl?.kind);
     controlsLocked = state.controls_locked === true || localMenuPending;
     controlLockEl.hidden = !controlsLocked;
     controlLockEl.textContent = localMenuPending
@@ -546,15 +557,14 @@
     });
     pumpOn.disabled = blocked || pumpPending;
     const release = document.querySelector('button[data-speed-clear]');
-    const manualSpeed = state.automation?.manual_override?.pump_preset;
-    const releasePending = localSpeedPending !== null && localSpeedPending.target == null;
+    const releasePending = pendingControl?.kind === 'resume-schedule';
     setButtonState(release, {
       // Resume Schedule is an action, not a selectable operating state.
       // Show only its temporary pending state, then return it to neutral.
       active: false,
       pending: releasePending,
     });
-    release.disabled = blocked || (!state.vsp?.busy && !manualSpeed);
+    release.disabled = blocked || releasePending || state.automation?.manual_override == null;
 
     const targetStatus = state.heater_targets || {};
     document.querySelectorAll('button[data-temperature-body]').forEach(btn => {
@@ -563,7 +573,7 @@
       const known = targetStatus.known?.[body] === true;
       const label = body.charAt(0).toUpperCase() + body.slice(1);
       btn.textContent = `${label} ${known ? (target == null ? 'Off' : `${target}°F`) : '--'}`;
-      const temperaturePending = pendingControl?.kind === 'temperature'
+      const temperaturePending = ['temperature', 'temperature-scan'].includes(pendingControl?.kind)
         && pendingControl.body === body;
       setButtonState(btn, {
         active: !temperaturePending && selectedTemperatureBody === body,
@@ -571,10 +581,6 @@
       });
       btn.disabled = blocked || temperaturePending;
     });
-    const refreshTargets = document.querySelector('button[data-temperature-refresh]');
-    const refreshPending = pendingControl?.kind === 'temperature-refresh';
-    setButtonState(refreshTargets, {active: false, pending: refreshPending});
-    refreshTargets.disabled = blocked || refreshPending;
     temperatureEditorEl.hidden = selectedTemperatureBody == null;
     temperatureValueEl.textContent = stagedTemperatureF == null ? '--' : `${stagedTemperatureF}°F`;
     document.querySelectorAll('button[data-temperature-adjust]').forEach(btn => {
@@ -620,7 +626,10 @@
       });
       const result = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(result.error || res.statusText);
-      if (pendingControl?.token === commandToken) pendingControl.accepted = true;
+      if (pendingControl?.token === commandToken) {
+        pendingControl.accepted = true;
+        pendingControl.operationId = result.status?.operation_id ?? null;
+      }
       equipmentStateEl.textContent = 'Command accepted';
     } catch (e) {
       if (pendingControl?.token === commandToken) pendingControl = null;
@@ -672,21 +681,16 @@
     );
   });
   document.querySelector('button[data-speed-clear]').addEventListener('click', () => {
-    postControl('/api/vsp/speed', {}, 'DELETE', {kind: 'speed', target: null});
+    postControl('/api/automation/manual', {}, 'DELETE', {kind: 'resume-schedule'});
   });
   document.querySelectorAll('button[data-temperature-body]').forEach(btn => {
     btn.addEventListener('click', () => {
       const body = btn.dataset.temperatureBody;
-      const current = equipmentState?.heater_targets?.targets?.[body];
-      const known = equipmentState?.heater_targets?.known?.[body] === true;
-      if (!known) {
-        return postControl(
-          '/api/heater-targets/refresh', {}, 'POST', {kind: 'temperature-refresh'}
-        );
-      }
-      selectedTemperatureBody = body;
-      stagedTemperatureF = current ?? equipmentState?.heater_targets?.minimum_f ?? 65;
-      renderEquipment(equipmentState);
+      selectedTemperatureBody = null;
+      stagedTemperatureF = null;
+      postControl(
+        '/api/heater-targets/scan', {body}, 'POST', {kind: 'temperature-scan', body}
+      );
     });
   });
   document.querySelectorAll('button[data-temperature-adjust]').forEach(btn => {
@@ -714,9 +718,6 @@
     selectedTemperatureBody = null;
     stagedTemperatureF = null;
     renderEquipment(equipmentState);
-  });
-  document.querySelector('button[data-temperature-refresh]').addEventListener('click', () => {
-    postControl('/api/heater-targets/refresh', {}, 'POST', {kind: 'temperature-refresh'});
   });
 
   async function sendKey(k) {

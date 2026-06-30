@@ -258,6 +258,7 @@ class AutomationEngine:
         self._last_error: Optional[str] = None
         self._last_tick_utc: Optional[datetime] = None
         self._desired: Optional[DesiredState] = None
+        self._startup_target_scan_attempted = False
         self._last_manual_release_local_date = self._initial_manual_release_date()
         self._load()
 
@@ -276,6 +277,22 @@ class AutomationEngine:
             (self._clock_sync is not None and self._clock_sync.is_busy())
             or (self._heater_targets is not None and self._heater_targets.is_busy())
         )
+
+    def _scan_targets_after_startup_speed_confirmation(self) -> bool:
+        """Read targets once when startup adopts an already-matching speed."""
+        if self._heater_targets is None or self._startup_target_scan_attempted:
+            return False
+        target_status = self._heater_targets.status()
+        observed = target_status.get("observed_since_startup") or {}
+        if all(observed.get(body) is True for body in ("pool", "spa")):
+            self._startup_target_scan_attempted = True
+            return False
+        self._startup_target_scan_attempted = True
+        self._heater_targets.request_refresh()
+        with self._lock:
+            self._phase = "scanning_startup_heater_targets"
+            self._last_error = None
+        return True
 
     @staticmethod
     def _manual_dict(manual: ManualOverride) -> dict:
@@ -827,6 +844,8 @@ class AutomationEngine:
                 and vsp.get("verified")
                 and observed_matches
             ):
+                if self._scan_targets_after_startup_speed_confirmation():
+                    return True
                 with self._lock:
                     self._phase = "observed_speed"
                     self._last_error = None

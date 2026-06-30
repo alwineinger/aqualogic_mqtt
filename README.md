@@ -316,21 +316,28 @@ stable `holding` phase also does not lock the controls.
 
 The Pump On button reflects and controls the PL-PLUS Filter relay independently
 of the selected speed preset. Pool and Spa target temperatures are cached under
-Equipment and can be staged with +/− before Confirm performs a serialized
-Settings-menu write. OpenClaw can use the same API directly:
+Equipment. The cache is populated passively whenever a scheduled speed change
+visits the two Heater1 pages and by a read-only scan after startup confirms an
+already-matching pump speed. Clicking a Pool or Spa target first scans that
+specific current hardware setting, then opens the +/− editor; only Confirm
+performs a serialized Settings-menu write. OpenClaw can use the same API
+directly:
 
 ```bash
 curl http://127.0.0.1:8089/api/heater-targets
-curl -X POST http://127.0.0.1:8089/api/heater-targets/refresh
+curl -X POST http://127.0.0.1:8089/api/heater-targets/scan \
+  -H 'Content-Type: application/json' -d '{"body":"spa"}'
 curl -X POST http://127.0.0.1:8089/api/control/temperature \
   -H 'Content-Type: application/json' -d '{"body":"spa","target_f":102}'
 ```
 
 Numeric targets are restricted to the PL-PLUS range of 65–104°F. Hardware
 Service mode and concurrent LCD-menu work inhibit reads and writes.
-Refreshing targets is strictly read-only: it uses only Menu/Right navigation
-and never sends Plus or Minus. The driver changes a target only after an
-explicit confirmed WebUI edit or `POST /api/control/temperature`. A displayed
+Target scans are strictly read-only: they use only Menu/Right navigation and
+never send Plus or Minus. The full `POST /api/heater-targets/refresh` endpoint
+remains available for compatibility, but there is no separate Refresh Targets
+button. The driver changes a target only after an explicit confirmed WebUI edit
+or `POST /api/control/temperature`. A displayed
 `Manual Off` is a heater operating-state observation and must not be described
 as proof that the stored numeric setpoint was erased; use `observed_at_utc` and
 the raw display when diagnosing that case.
@@ -345,7 +352,9 @@ global lock until completion. Mode, speed, and equipment selections then show
 their confirmed state in green; Resume
 Schedule is momentary and returns to neutral. Failed or timed-out commands
 restore the confirmed hardware presentation instead of leaving a false active
-state.
+state. Resume Schedule clears the complete timed manual override (mode, speed,
+Filter, Lights, Blower, and Heater Relay fields), not only its pump-speed field;
+durable Pool Heat and calendar Spa sessions are separate state and are retained.
 
 Existing Home Assistant/Hubitat discovery IDs and command topics are unchanged.
 While host automation is enabled, Filter, Lights, Aux1/Blower, Aux2/Heater

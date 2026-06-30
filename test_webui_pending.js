@@ -43,7 +43,6 @@ const releaseButton = new Button({speedClear: 'true'});
 const pumpOnButton = new Button({pumpOn: 'true'});
 const temperatureButtons = ['pool', 'spa'].map(body => new Button({temperatureBody: body}));
 const temperatureAdjustButtons = ['minus', 'plus'].map(value => new Button({temperatureAdjust: value}));
-const temperatureRefreshButton = new Button({temperatureRefresh: 'true'});
 const temperatureConfirmButton = new Button({temperatureConfirm: 'true'});
 const temperatureCancelButton = new Button({temperatureCancel: 'true'});
 const panel = element();
@@ -61,7 +60,6 @@ const documentMock = {
     if (selector === '.panel') return panel;
     if (selector === 'button[data-speed-clear]') return releaseButton;
     if (selector === 'button[data-pump-on]') return pumpOnButton;
-    if (selector === 'button[data-temperature-refresh]') return temperatureRefreshButton;
     if (selector === 'button[data-temperature-confirm]') return temperatureConfirmButton;
     if (selector === 'button[data-temperature-cancel]') return temperatureCancelButton;
     throw new Error(`unexpected selector: ${selector}`);
@@ -111,6 +109,7 @@ function state(overrides = {}) {
     heater_targets: {
       available: true, busy: false, phase: 'complete', minimum_f: 65, maximum_f: 104,
       targets: {pool: 85, spa: 102}, known: {pool: true, spa: true},
+      observed_at_utc_by_body: {pool: '2026-06-29T12:00:00Z', spa: '2026-06-29T12:00:00Z'},
     },
     vsp: {enabled: true, busy: true, phase: 'holding', target_name: 'speed1'},
     automation: {
@@ -183,13 +182,14 @@ const manualSpeedState = state({
     desired: {pump_preset: 'speed2'},
   },
 });
-setPending({kind: 'speed', target: null, accepted: true, startedAt: Date.now()});
+setPending({kind: 'resume-schedule', accepted: false, startedAt: Date.now()});
 render(manualSpeedState);
-expectButton(speedButtons[1], {active: false, pending: false, disabled: true});
+expectButton(speedButtons[1], {active: true, pending: false, disabled: false});
 expectButton(releaseButton, {active: false, pending: true, disabled: true});
+setPending({kind: 'resume-schedule', accepted: true, startedAt: Date.now()});
 render(state({mode: 'spa'}));
 expectButton(speedButtons[0], {active: true, pending: false, disabled: false});
-expectButton(releaseButton, {active: false, pending: false, disabled: false});
+expectButton(releaseButton, {active: false, pending: false, disabled: true});
 assert.strictEqual(releaseButton.attributes['aria-pressed'], 'false');
 
 setPending({kind: 'switch', control: 'lights', target: true, accepted: true, startedAt: Date.now()});
@@ -214,16 +214,34 @@ expectButton(navButtons[0], {active: false, pending: false, disabled: true});
 render(state({heater_targets: {
   available: true, busy: false, phase: 'complete', minimum_f: 65, maximum_f: 104,
   targets: {pool: 85, spa: 103}, known: {pool: true, spa: true},
+  observed_at_utc_by_body: {pool: '2026-06-29T12:00:00Z', spa: '2026-06-29T12:00:00Z'},
 }}));
 expectButton(temperatureButtons[1], {active: false, pending: false, disabled: false});
 
 render(state({heater_targets: {
   available: true, busy: false, phase: 'complete', minimum_f: 65, maximum_f: 104,
   targets: {pool: null, spa: null}, known: {pool: true, spa: true},
+  observed_at_utc_by_body: {pool: '2026-06-29T12:00:00Z', spa: '2026-06-29T12:00:00Z'},
 }}));
 assert.strictEqual(temperatureButtons[0].textContent, 'Pool Off');
 assert.strictEqual(temperatureButtons[1].textContent, 'Spa Off');
 temperatureButtons[0].listeners.click();
+expectButton(temperatureButtons[0], {active: false, pending: true, disabled: true});
+const scanStartedAt = Date.now();
+setPending({
+  kind: 'temperature-scan', body: 'pool', accepted: true,
+  startedAt: scanStartedAt, operationId: 'scan-pool-1',
+});
+render(state({heater_targets: {
+  available: true, busy: false, phase: 'complete', operation_id: 'scan-pool-1',
+  minimum_f: 65, maximum_f: 104,
+  targets: {pool: null, spa: null}, known: {pool: true, spa: true},
+  observed_at_utc_by_body: {
+    pool: new Date(scanStartedAt + 1000).toISOString(),
+    spa: '2026-06-29T12:00:00Z',
+  },
+}}));
+assert.strictEqual(elements['temperature-editor'].hidden, false);
 assert.strictEqual(elements['temperature-value'].textContent, '65°F');
 
 console.log('WebUI pending-state tests passed.');

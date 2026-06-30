@@ -67,6 +67,8 @@ def update_display(lines: Optional[List[str]], blink: Optional[List[Tuple[int, i
         observed_lines = current.get("lines") if lines is not None else []
         observed_leds = current.get("leds") if leds is not None or lines is not None else None
         _default_menu.observe_display(observed_lines, observed_leds, current.get("updated_at"))
+        if _heater_targets is not None and observed_lines:
+            _heater_targets.observe_display(observed_lines)
 
 def get_display() -> dict:
     return _state.as_dict()
@@ -103,6 +105,15 @@ def refresh_heater_targets() -> dict:
     if not _heater_targets.is_busy() and _automation is not None and _automation.hardware_busy():
         raise RuntimeError("heater target read is blocked while another LCD menu operation is active")
     return _heater_targets.request_refresh()
+
+def scan_heater_target(body: str) -> dict:
+    if _heater_targets is None:
+        raise RuntimeError("heater target driver is not registered")
+    if _vsp_driver is not None and _vsp_driver.is_menu_busy():
+        raise RuntimeError("heater target read is blocked while a VSP menu operation is active")
+    if not _heater_targets.is_busy() and _automation is not None and _automation.hardware_busy():
+        raise RuntimeError("heater target read is blocked while another LCD menu operation is active")
+    return _heater_targets.request_scan(body)
 
 def set_heater_target(body: str, target_f: int) -> dict:
     if _heater_targets is None:

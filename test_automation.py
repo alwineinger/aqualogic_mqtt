@@ -192,12 +192,23 @@ class FakeClockSync:
 class FakeHeaterTargets:
     def __init__(self, busy=False):
         self.busy = busy
+        self.refresh_calls = 0
+        self.observed_since_startup = {"pool": False, "spa": False}
 
     def is_busy(self):
         return self.busy
 
     def status(self):
-        return {"busy": self.busy, "phase": "reading" if self.busy else "complete"}
+        return {
+            "busy": self.busy,
+            "phase": "reading" if self.busy else "complete",
+            "observed_since_startup": dict(self.observed_since_startup),
+        }
+
+    def request_refresh(self):
+        self.refresh_calls += 1
+        self.busy = True
+        return self.status()
 
 
 class AutomationEngineTest(unittest.TestCase):
@@ -262,6 +273,23 @@ class AutomationEngineTest(unittest.TestCase):
         self.assertEqual(vsp.state["target_name"], "speed1")
         self.assertTrue(vsp.state["verified"])
         self.assertEqual(engine.status()["phase"], "observed_speed")
+
+    def test_matching_startup_speed_triggers_one_read_only_target_scan(self):
+        targets = FakeHeaterTargets()
+        engine, _equipment, vsp = self.make_engine(
+            ["2026-06-27T12:00:00Z"], heater_targets=targets
+        )
+        vsp.state["requested_speed_pct"] = 70
+
+        self.assertFalse(engine.tick())
+        self.assertTrue(engine.tick())
+        self.assertEqual(targets.refresh_calls, 1)
+        self.assertEqual(engine.status()["phase"], "scanning_startup_heater_targets")
+
+        targets.busy = False
+        targets.observed_since_startup = {"pool": True, "spa": True}
+        self.assertFalse(engine.tick())
+        self.assertEqual(targets.refresh_calls, 1)
 
     def test_unconfirmed_startup_auto_heat_assumption_never_sends_a_command(self):
         engine, equipment, vsp = self.make_engine(["2026-06-27T12:00:00Z"])
